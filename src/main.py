@@ -5,12 +5,13 @@ import sfm_pipeline_lib as pipeline
 from file_reading_lib import gen_images_from_vid 
 
 # Convert the video into images 
-vid_path = "images/0d71fdc0-d415-4600-9d05-a38b69ba1b48.mp4"
-store_path="images/batmobile"
+# vid_path = "images/batmo.mp4"
+vid_path = 'images/ben.mp4'
+store_path="images/ben"
 gen_images_from_vid( vid_path, store_path ) 
 
 # Storage files 
-im_path = "data"
+im_path = store_path
 db_path = "database.db"
 sparse_path = "sparse"
 dense_path = "dense"
@@ -31,7 +32,7 @@ sfm_pipeline = pipeline.StrcFromMotion(
     device      =pycolmap.Device.cpu 
 ) 
 
-sfm_pipeline.resize_ims( store_path, 1200, 10 )
+sfm_pipeline.resize_ims( store_path, 1200, 5 )
 sfm_pipeline.prep_pointcloud() 
 sfm_pipeline.make_point_cloud()
 sfm_pipeline.plot_pointcloud() 
