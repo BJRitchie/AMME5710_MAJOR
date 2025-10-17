@@ -106,7 +106,6 @@ pycolmap.undistort_images(
     output_type="COLMAP",
 )
 
-
 ################### PATCH MATCH STEREO ###################
 print("=== Running Patch Match Stereo ===")
 wkspace_path = dense_path
