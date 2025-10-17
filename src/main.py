@@ -22,7 +22,7 @@ sift_ops.first_octave = 0
 sift_ops.num_octaves = 4
 
 # Initialise the pipeline 
-sfm_pipeline = pipeline.SFM( 
+sfm_pipeline = pipeline.StrcFromMotion( 
     db_path, im_path, sparse_path, dense_path, 
     cam_mode    =pycolmap.CameraMode.AUTO, 
     cam_model   ="SIMPLE_RADIAL",  # AUTO let COLMAP detect the camera model - AUTO DOESNT WORK, 

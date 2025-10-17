@@ -6,7 +6,7 @@ import shutil
 import open3d as o3d
 import matplotlib.pyplot as plt
 
-class SFM: 
+class StrcFromMotion: 
     def __init__(self, 
                  db_path:       str, 
                  im_path:       str, 
