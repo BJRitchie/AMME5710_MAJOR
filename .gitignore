@@ -8,7 +8,7 @@ data_storage
 dataset.db 
 database.db 
 data 
-__pycache__/
+*__pycache__/
 
 # # Exceptions
 # !src/
