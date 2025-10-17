@@ -1,11 +1,13 @@
 *.bin
 .venv
 .vscode
-ceres*
-dense
-sparse
-database.db
-dataset.db
+ceres* 
+dense/***
+sparse/***
+data_storage
+dataset.db 
+database.db 
+data 
 
 # # Exceptions
 # !src/

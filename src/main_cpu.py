@@ -19,7 +19,7 @@ import matplotlib.pyplot as plt
 # dense_path = os.path.join(DATASET_PATH, "dense")
 
 # ====> CHANGE THIS TO YOUR DATASET PATH
-im_path = "images/kelly"
+im_path = "data"
 
 # Clean up any old files
 db_path = "database.db"
@@ -40,7 +40,8 @@ os.makedirs(dense_path, exist_ok=True)
 
 ################### IMAGE RESIZING ###################
 im_names = [f for f in os.listdir(im_path) if f.lower().endswith(('.jpg', '.png', '.jpeg'))]
-MAX_SIZE = 1200  # downscale largest dimension
+# im_names = im_names[::10] # Take only every 10th image 
+MAX_SIZE = 1200  # downscale largest dimension 
 
 for f in im_names:
     path = os.path.join(im_path, f)
