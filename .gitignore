@@ -1,0 +1,12 @@
+.venv
+.vscode
+ceres*
+dense
+sparse
+database.db
+dataset.db
+
+# # Exceptions
+# !src/
+# !images/
+# !README.md
