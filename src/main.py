@@ -5,7 +5,6 @@ import sfm_pipeline_lib as pipeline
 from file_reading_lib import gen_images_from_vid 
 
 # Convert the video into images 
-# vid_path = "images/batmo.mp4"
 vid_path = 'images/ben.mp4'
 store_path="images/ben"
 gen_images_from_vid( vid_path, store_path ) 
