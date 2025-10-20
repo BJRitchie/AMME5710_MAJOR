@@ -5,8 +5,11 @@ import sfm_pipeline_lib as pipeline
 from file_reading_lib import gen_images_from_vid 
 
 # Convert the video into images 
-vid_path = 'images/ben.mp4'
-store_path="images/ben"
+# vid_path = "images/batmo.mp4"
+# vid_path = 'images/ben.mp4'
+# store_path="images/ben"
+vid_path = 'images/first_sat.mp4'
+store_path="images/first_sat"
 gen_images_from_vid( vid_path, store_path ) 
 
 # Storage files 
@@ -25,7 +28,7 @@ sift_ops.num_octaves = 4
 sfm_pipeline = pipeline.StrcFromMotion( 
     db_path, im_path, sparse_path, dense_path, 
     cam_mode    =pycolmap.CameraMode.AUTO, 
-    cam_model   ="SIMPLE_RADIAL",  # AUTO let COLMAP detect the camera model - AUTO DOESNT WORK, 
+    cam_model   ="SIMPLE_RADIAL",  
     reader_ops  =pycolmap.ImageReaderOptions(), 
     sift_ops    =sift_ops, 
     device      =pycolmap.Device.cpu 

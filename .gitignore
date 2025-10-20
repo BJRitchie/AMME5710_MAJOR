@@ -8,6 +8,7 @@ data_storage
 dataset.db 
 database.db 
 data 
+images/
 *__pycache__/
 
 # # Exceptions
