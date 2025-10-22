@@ -5,6 +5,7 @@ import os
 import shutil
 import open3d as o3d
 import matplotlib.pyplot as plt
+from plyfile import PlyData
 
 class StrcFromMotion: 
     def __init__(self, 
@@ -105,10 +106,10 @@ class StrcFromMotion:
 
         return 
 
-    def make_point_cloud( self, store_name="0" ): 
+    def make_pointcloud( self, store_path = "0" ): 
         
         # Read the reconstructed point cloud 
-        rec_path = os.path.join(self._sparse_path, store_name)
+        rec_path = os.path.join(self._sparse_path, store_path) 
         
         # Reconstruct the pointcloud 
         rec = pycolmap.Reconstruction(rec_path)
@@ -120,6 +121,22 @@ class StrcFromMotion:
         self._points_ply = os.path.join(rec_path, "points.ply")
         rec.export_PLY(self._points_ply)
         print("Saved sparse point cloud to", self._points_ply)
+
+        return 
+
+    def clean_pointcloud( self, store_path="0", nb_points=50, radius=10.0 ):         
+        # Read the pcloud 
+        path = os.path.join( self._sparse_path, store_path, "points.ply" ) 
+        pcd = o3d.io.read_point_cloud( path ) 
+        
+        # Apply radis outlier removal 
+        cl, ind = pcd.remove_radius_outlier( nb_points = nb_points, radius = radius )
+        
+        # Extract the inlier point cloud
+        denoised_pcd = pcd.select_by_index(ind) 
+        
+        # Store back in ply file 
+        o3d.io.write_point_cloud(path, denoised_pcd, write_ascii=False, compressed=False) 
 
         return 
 
@@ -143,33 +160,18 @@ class StrcFromMotion:
 
         return 
 
-
-    ################### Plotting #####################
-    # def plot_pointcloud(self): 
-        
-    #     if os.path.exists(self._points_ply):
-    #         print("=== Loading and visualizing sparse point cloud ===")
-    #         pcd = o3d.io.read_point_cloud(self._points_ply)
-    #         o3d.visualization.draw_geometries([pcd])
-    #     else:
-    #         print(f"No sparse point cloud found at {self._points_ply}. Sparse mapping might have failed.")
-        
-    #     return 
-    
-    def plot_pointcloud(self, store_name="0", camera_scale=0.1): 
-        
-        if not os.path.exists(self._points_ply):
-            print(f"No sparse point cloud found at {self._points_ply}. Sparse mapping might have failed.")
-            return
-        
+    ################### Plotting #####################    
+    def plot_pointcloud(self, store_path="0", camera_scale=0.1): 
+            
         print("=== Loading and visualizing sparse point cloud with cameras ===")
         
-        # Load point cloud
-        pcd = o3d.io.read_point_cloud(self._points_ply)
+        # Load point cloud 
+        store_name = os.path.join( self._sparse_path, store_path ) 
+        file_path =  os.path.join( self._sparse_path, store_path, "points.ply" )
+        pcd = o3d.io.read_point_cloud( file_path ) 
         
         # Load reconstruction to get camera poses
-        rec_path = os.path.join(self._sparse_path, store_name)
-        rec = pycolmap.Reconstruction(rec_path)
+        rec = pycolmap.Reconstruction( store_name )
         
         # Create camera frustum visualizations
         geometries = [pcd]
@@ -246,7 +248,6 @@ class StrcFromMotion:
         o3d.visualization.draw_geometries(geometries)
         
         return    
-    
     
     def plot_keypoints(self): 
         

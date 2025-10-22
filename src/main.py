@@ -8,8 +8,8 @@ from file_reading_lib import gen_images_from_vid
 # vid_path = "images/batmo.mp4"
 # vid_path = 'images/ben.mp4'
 # store_path="images/ben"
-vid_path = 'images/first_sat.mp4'
-store_path="images/first_sat"
+vid_path = 'images/ben.mp4'
+store_path="images/ben"
 gen_images_from_vid( vid_path, store_path ) 
 
 # Storage files 
@@ -25,8 +25,8 @@ sift_ops.first_octave = 0
 sift_ops.num_octaves = 4
 
 # Initialise the pipeline 
-sfm_pipeline = pipeline.StrcFromMotion( 
-    db_path, im_path, sparse_path, dense_path, 
+sfm_pipeline = pipeline.StrcFromMotion ( 
+    db_path, im_path, sparse_path, dense_path,
     cam_mode    =pycolmap.CameraMode.AUTO, 
     cam_model   ="SIMPLE_RADIAL",  
     reader_ops  =pycolmap.ImageReaderOptions(), 
@@ -34,8 +34,9 @@ sfm_pipeline = pipeline.StrcFromMotion(
     device      =pycolmap.Device.cpu 
 ) 
 
-sfm_pipeline.resize_ims( store_path, 1200, 5 )
+sfm_pipeline.resize_ims( store_path, 1200, 10 )
 sfm_pipeline.prep_pointcloud() 
-sfm_pipeline.make_point_cloud()
+sfm_pipeline.make_pointcloud()
+sfm_pipeline.clean_pointcloud() 
 sfm_pipeline.plot_pointcloud() 
 
