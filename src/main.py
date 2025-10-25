@@ -8,8 +8,8 @@ from file_reading_lib import gen_images_from_vid
 # vid_path = "images/batmo.mp4"
 # vid_path = 'images/ben.mp4'
 # store_path="images/ben"
-vid_path = 'images/sat_checkerboard.mp4'
-store_path="images/sat_checkerboard"
+vid_path = 'images/sat_orange.mp4'
+store_path="images/sat_orange"
 gen_images_from_vid( vid_path, store_path ) 
 
 # Storage files 
@@ -37,6 +37,6 @@ sfm_pipeline = pipeline.StrcFromMotion (
 sfm_pipeline.resize_ims( store_path, 1200, 10 )
 sfm_pipeline.prep_pointcloud() 
 sfm_pipeline.make_pointcloud()
-# sfm_pipeline.clean_pointcloud() 
+# sfm_pipeline.clean_pointcloud() # TODO experiment with this a bit more - gets rid of far outliers but not close ones (just off of body)
 sfm_pipeline.plot_pointcloud() 
 

@@ -95,9 +95,9 @@ if __name__ == "__main__":
     points_rgb = np.asarray(pcd.colors)  # Nx3, RGB in [0,1]
 
     # Thresholds
-    H_min, H_max = 0.1, 0.2
-    S_min, S_max = 0.5, 1.0
-    V_min, V_max = 0.2, 1.0
+    H_min, H_max = 0.95, 1.0
+    S_min, S_max = 0.6, 0.9
+    V_min, V_max = 0.6, 0.9
     thresholds = [
         ([H_min, S_min, V_min], [H_max, S_max, V_max])  
     ]
@@ -154,30 +154,23 @@ if __name__ == "__main__":
     # -----------------------------
     # Compute distance and scale factor
     # -----------------------------
-    known_distance = 0.05  # meters, for example
+    known_distance = 0.06  # meters, for example
     measured_distance = np.linalg.norm(centroids[0] - centroids[1])
     scale_factor = known_distance / measured_distance
     print(f"Measured distance: {measured_distance:.6f}, True distance: {known_distance}m → Scale factor: {scale_factor:.6f}")
 
 
     # -----------------------------
-    # Apply scale factor to original point cloud
+    # Apply scale factor to original point cloud and plot
     # -----------------------------
     points_scaled = points * scale_factor
     scaled_pcd = o3d.geometry.PointCloud()
     scaled_pcd.points = o3d.utility.Vector3dVector(points_scaled)
     scaled_pcd.colors = o3d.utility.Vector3dVector(colors)  # keep original colors
 
-
-    # -----------------------------
-    # Assume scaled_pcd is your scaled Open3D point cloud
-    # -----------------------------
     points = np.asarray(scaled_pcd.points)
     colors = np.asarray(scaled_pcd.colors)
 
-    # -----------------------------
-    # Draw Open3D point cloud
-    # -----------------------------
     o3d.visualization.draw_geometries([scaled_pcd], window_name="Scaled Point Cloud")
 
     # -----------------------------
@@ -189,24 +182,24 @@ if __name__ == "__main__":
     # Scatter original points
     ax.scatter(points[:,0], points[:,1], points[:,2], c=colors, s=1)
 
-    # Draw axes lines (1 cm = 0.01 m)
+    # # Draw axes lines (1 cm = 0.01 m)
     axis_length = 0.01
-    ax.quiver(0, 0, 0, axis_length, 0, 0, color='r', linewidth=2, arrow_length_ratio=0.1)
-    ax.quiver(0, 0, 0, 0, axis_length, 0, color='g', linewidth=2, arrow_length_ratio=0.1)
-    ax.quiver(0, 0, 0, 0, 0, axis_length, color='b', linewidth=2, arrow_length_ratio=0.1)
+    # ax.quiver(0, 0, 0, axis_length, 0, 0, color='r', linewidth=2, arrow_length_ratio=0.1)
+    # ax.quiver(0, 0, 0, 0, axis_length, 0, color='g', linewidth=2, arrow_length_ratio=0.1)
+    # ax.quiver(0, 0, 0, 0, 0, axis_length, color='b', linewidth=2, arrow_length_ratio=0.1)
 
     # Axis labels
-    ax.text(axis_length*1.05, 0, 0, "X", color='r', fontsize=12)
-    ax.text(0, axis_length*1.05, 0, "Y", color='g', fontsize=12)
-    ax.text(0, 0, axis_length*1.05, "Z", color='b', fontsize=12)
-    ax.text(axis_length*0.5, axis_length*0.5, axis_length*0.5, "1 cm", color='k', fontsize=10)
+    # ax.text(axis_length*1.05, 0, 0, "X", color='r', fontsize=12)
+    # ax.text(0, axis_length*1.05, 0, "Y", color='g', fontsize=12)
+    # ax.text(0, 0, axis_length*1.05, "Z", color='b', fontsize=12)
+    # ax.text(axis_length*0.5, axis_length*0.5, axis_length*0.5, "1 cm", color='k', fontsize=10)
 
     # Set aspect ratio equal
     ax.set_box_aspect([1,1,1])
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
-    ax.set_zlabel("Z")
-    plt.title("Scaled Point Cloud with 1 cm Axis Reference")
+    ax.set_xlabel("X (m)")
+    ax.set_ylabel("Y (m)")
+    ax.set_zlabel("Z (m)")
+    plt.title("Scaled Point Cloud")
     plt.show()
 
 
