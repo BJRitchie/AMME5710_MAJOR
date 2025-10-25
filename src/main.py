@@ -37,6 +37,6 @@ sfm_pipeline = pipeline.StrcFromMotion (
 sfm_pipeline.resize_ims( store_path, 1200, 10 )
 sfm_pipeline.prep_pointcloud() 
 sfm_pipeline.make_pointcloud()
-sfm_pipeline.clean_pointcloud() 
+# sfm_pipeline.clean_pointcloud() 
 sfm_pipeline.plot_pointcloud() 
 
