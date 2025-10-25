@@ -8,8 +8,8 @@ from file_reading_lib import gen_images_from_vid
 # vid_path = "images/batmo.mp4"
 # vid_path = 'images/ben.mp4'
 # store_path="images/ben"
-vid_path = 'images/ben.mp4'
-store_path="images/ben"
+vid_path = 'images/sat_checkerboard.mp4'
+store_path="images/sat_checkerboard"
 gen_images_from_vid( vid_path, store_path ) 
 
 # Storage files 

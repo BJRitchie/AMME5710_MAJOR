@@ -80,6 +80,10 @@ class Checkerboard:
             
             # Detect and refine  
             ret, corners = cv2.findChessboardCorners(im, grid_size, None) 
+            # ret, corners = cv2.findChessboardCorners(
+            #     im, grid_size,
+            #     cv2.CALIB_CB_ADAPTIVE_THRESH + cv2.CALIB_CB_NORMALIZE_IMAGE
+            # )
             if not ret:
                 print(f"Checkerboard not found, skipping.")
                 continue 
@@ -180,14 +184,285 @@ class Checkerboard:
             mesh_show_back_face=True
         )
 
+    def compute_scale(self, reconstructed_points, pattern_index=0):
+        """
+        Compute the metric scale factor for an unscaled 3D reconstruction,
+        using the known physical size of the checkerboard.
 
-if __name__ == "__main__": 
+        Args:
+            reconstructed_points (np.ndarray): Nx3 array of reconstructed checkerboard corner points
+                                            (in arbitrary units, same order as calibration detection).
+            pattern_index (int): which checkerboard pose to reference (default=0)
+
+        Returns:
+            float: scale factor to convert reconstruction to metric units
+        """
+        assert hasattr(self, "_grid_size") and hasattr(self, "_cell_size"), \
+            "Run undistort_ims() first to define grid and cell size."
+        assert reconstructed_points.shape[1] == 3, \
+            "reconstructed_points must be Nx3."
+
+        # Build the true (known) checkerboard corner coordinates in meters
+        objp = np.zeros((np.prod(self._grid_size), 3), np.float32)
+        objp[:, :2] = np.indices(self._grid_size).T.reshape(-1, 2)
+        objp *= self._cell_size
+
+        # Compute distance between two adjacent corners along one axis
+        real_dist = np.linalg.norm(objp[0] - objp[1])
+        recon_dist = np.linalg.norm(reconstructed_points[0] - reconstructed_points[1])
+
+        if recon_dist < 1e-9:
+            raise ValueError("Reconstructed points are degenerate (zero distance detected).")
+
+        scale_factor = real_dist / recon_dist
+        print(f"[Scale] Real: {real_dist:.6f} m | Recon: {recon_dist:.6f} units | Scale factor: {scale_factor:.6f}")
+        return scale_factor
+
+
+    def apply_scale(self, points, scale_factor):
+        """
+        Apply the computed scale factor to a 3D reconstruction.
+
+        Args:
+            points (np.ndarray): Nx3 point cloud (unscaled)
+            scale_factor (float): scale factor from compute_scale()
+
+        Returns:
+            np.ndarray: Nx3 scaled point cloud (metric)
+        """
+        assert points.shape[1] == 3, "points must be Nx3"
+        return points * scale_factor
+
+if __name__ == "__main__":
+    import open3d as o3d
+    import numpy as np
+    from sklearn.neighbors import NearestNeighbors
+    import matplotlib.pyplot as plt
+
+    # -----------------------------
+    # 1. Calibrate camera using checkerboard images
+    # -----------------------------
     cb = Checkerboard() 
-    cb.read_ims("images/checkerboards") 
-    cb.undistort_ims(grid_size=(8,6), cell_size=0.116)
-    cb.plot_checkerboards() 
-    
-    plt.show()
+    cb.read_ims("images/sat_checkerboard_pgm") 
+    cb.undistort_ims(grid_size=(3, 3), cell_size=0.016)  # 4x4 internal corners, 16 mm cells
+    cb.plot_checkerboards()
+
+    # -----------------------------
+    # 2. Load point cloud (object + checkerboard)
+    # -----------------------------
+    pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
+    points = np.asarray(pcd.points)
+    print(f"Loaded point cloud with {points.shape[0]} points")
+
+    # -----------------------------
+    # 3. Detect checkerboard plane automatically using RANSAC
+    # -----------------------------
+    plane_model, inliers = pcd.segment_plane(
+        distance_threshold=0.002,  # adjust if needed
+        ransac_n=3,
+        num_iterations=1000
+    )
+
+    # Separate inliers (checkerboard) and outliers (everything else)
+    checkerboard_pcd = pcd.select_by_index(inliers)
+    checkerboard_points = np.asarray(checkerboard_pcd.points)
+    object_only_pcd = pcd.select_by_index(inliers, invert=True)
+    print(f"Detected {checkerboard_points.shape[0]} points on checkerboard plane")
+
+    # -----------------------------
+    # Visualize the detected plane vs rest of point cloud
+    # -----------------------------
+    checkerboard_colored = checkerboard_pcd.paint_uniform_color([1, 0, 0])  # red = checkerboard
+    object_colored = object_only_pcd.paint_uniform_color([0.6, 0.6, 0.6])  # grey = object
+    o3d.visualization.draw_geometries(
+        [checkerboard_colored, object_colored],
+        window_name="Detected Checkerboard Plane (Red)"
+    )
+
+    # -----------------------------
+    # 4. Compute reconstructed cell size (mean nearest neighbor distance)
+    # -----------------------------
+    nbrs = NearestNeighbors(n_neighbors=2).fit(checkerboard_points)
+    distances, indices = nbrs.kneighbors(checkerboard_points)
+    mean_cell_recon = np.mean(distances[:, 1])  # skip self-distance
+    print(f"Mean reconstructed cell size: {mean_cell_recon:.6f} (arbitrary units)")
+
+    # Visualize nearest-neighbor connections on checkerboard
+    lines = []
+    for i in range(len(checkerboard_points)):
+        neighbor_idx = indices[i, 1]
+        lines.append([i, neighbor_idx])
+    line_set = o3d.geometry.LineSet(
+        points=o3d.utility.Vector3dVector(checkerboard_points),
+        lines=o3d.utility.Vector2iVector(lines),
+    )
+    line_set.paint_uniform_color([0, 0, 1])  # blue lines = neighbor pairs
+    o3d.visualization.draw_geometries(
+        [checkerboard_colored, line_set],
+        window_name="Nearest Neighbor Links (for Scale Estimation)"
+    )
+
+    # -----------------------------
+    # 5. Compute scale factor using Checkerboard method
+    # -----------------------------
+    scale_factor = cb.compute_scale(np.array([[0, 0, 0], [mean_cell_recon, 0, 0]]))
+    print(f"Computed scale factor from checkerboard: {scale_factor:.6f}")
+
+    # -----------------------------
+    # 6. Apply scale to entire point cloud
+    # -----------------------------
+    points_scaled = points * scale_factor
+    pcd.points = o3d.utility.Vector3dVector(points_scaled)
+    object_only_pcd = pcd.select_by_index(inliers, invert=True)
+    print(f"Applied metric scale to point cloud")
+
+    # -----------------------------
+    # 7. Visualize scaled object
+    # -----------------------------
+    o3d.visualization.draw_geometries(
+        [object_only_pcd],
+        window_name="Scaled Object (Checkerboard Removed)"
+    )
+
+
+# if __name__ == "__main__":
+#     import open3d as o3d
+#     import numpy as np
+#     from sklearn.neighbors import NearestNeighbors
+
+#     # -----------------------------
+#     # 1. Calibrate camera using checkerboard images
+#     # -----------------------------
+#     cb = Checkerboard() 
+#     cb.read_ims("images/sat_checkerboard_pgm") 
+#     cb.undistort_ims(grid_size=(3, 3), cell_size=0.016)  # 4x4 internal corners, 16 mm cells
+#     cb.plot_checkerboards()
+
+#     # -----------------------------
+#     # 2. Load point cloud (object + checkerboard)
+#     # -----------------------------
+#     pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
+#     points = np.asarray(pcd.points)
+#     print(f"Loaded point cloud with {points.shape[0]} points")
+
+#     # -----------------------------
+#     # 3. Detect checkerboard plane automatically using RANSAC
+#     # -----------------------------
+#     plane_model, inliers = pcd.segment_plane(distance_threshold=0.002,  # adjust if needed
+#                                              ransac_n=3,
+#                                              num_iterations=1000)
+#     checkerboard_pcd = pcd.select_by_index(inliers)
+#     checkerboard_points = np.asarray(checkerboard_pcd.points)
+#     print(f"Detected {checkerboard_points.shape[0]} points on checkerboard plane")
+
+#     # -----------------------------
+#     # 4. Compute reconstructed cell size (mean nearest neighbor distance)
+#     # -----------------------------
+#     nbrs = NearestNeighbors(n_neighbors=2).fit(checkerboard_points)
+#     distances, _ = nbrs.kneighbors(checkerboard_points)
+#     mean_cell_recon = np.mean(distances[:, 1])  # skip self-distance
+
+#     # Compute scale factor using Checkerboard method
+#     scale_factor = cb.compute_scale(np.array([[0, 0, 0], [mean_cell_recon, 0, 0]]))
+#     print(f"Computed scale factor from checkerboard: {scale_factor:.6f}")
+
+#     # -----------------------------
+#     # 5. Apply scale to entire point cloud
+#     # -----------------------------
+#     points_scaled = points * scale_factor
+#     pcd.points = o3d.utility.Vector3dVector(points_scaled)
+#     print("Applied metric scale to point cloud")
+
+#     # -----------------------------
+#     # 6. Remove checkerboard points to leave only the object
+#     # -----------------------------
+#     object_only_pcd = pcd.select_by_index(inliers, invert=True)
+#     print(f"Remaining points (object only): {np.asarray(object_only_pcd.points).shape[0]}")
+
+#     # -----------------------------
+#     # 7. Visualize scaled object
+#     # -----------------------------
+#     o3d.visualization.draw_geometries([object_only_pcd], window_name="Scaled Object")
+
+
+
+# if __name__ == "__main__":
+#     import open3d as o3d
+#     import numpy as np
+#     import matplotlib.pyplot as plt
+#     from sklearn.neighbors import NearestNeighbors
+
+#     # -----------------------------
+#     # 1. Calibrate camera using checkerboard images
+#     # -----------------------------
+#     cb = Checkerboard() 
+#     cb.read_ims("images/sat_checkerboard_pgm") 
+#     cb.undistort_ims(grid_size=(3, 3), cell_size=0.016)  # 4x4 internal corners, 16 mm cells
+#     cb.plot_checkerboards()
+
+#     # -----------------------------
+#     # 2. Load point cloud (object + checkerboard)
+#     # -----------------------------
+#     pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
+#     points = np.asarray(pcd.points)
+#     print(f"Loaded point cloud with {points.shape[0]} points")
+
+#     # -----------------------------
+#     # 3. Detect checkerboard plane automatically using RANSAC
+#     # -----------------------------
+#     plane_model, inliers = pcd.segment_plane(distance_threshold=0.002,  # adjust if needed
+#                                              ransac_n=3,
+#                                              num_iterations=1000)
+#     checkerboard_pcd = pcd.select_by_index(inliers)
+#     checkerboard_points = np.asarray(checkerboard_pcd.points)
+#     print(f"Detected {checkerboard_points.shape[0]} points on checkerboard plane")
+
+#     # -----------------------------
+#     # 4. Compute reconstructed cell size (mean nearest neighbor distance)
+#     # -----------------------------
+#     nbrs = NearestNeighbors(n_neighbors=2).fit(checkerboard_points)
+#     distances, _ = nbrs.kneighbors(checkerboard_points)
+#     mean_cell_recon = np.mean(distances[:, 1])  # skip self-distance
+
+#     # Use Checkerboard class to compute scale factor
+#     scale_factor = cb.compute_scale(np.array([[0,0,0], [mean_cell_recon,0,0]]))  # simple 2-point input
+#     print(f"Computed scale factor from checkerboard: {scale_factor:.6f}")
+
+#     # -----------------------------
+#     # 5. Apply scale to entire point cloud
+#     # -----------------------------
+#     points_scaled = points * scale_factor
+#     pcd.points = o3d.utility.Vector3dVector(points_scaled)
+#     print("Applied metric scale to point cloud")
+
+#     # -----------------------------
+#     # 6. Optional: remove checkerboard points to leave only the object
+#     # -----------------------------
+#     object_only_pcd = pcd.select_by_index(inliers, invert=True)
+
+#     # -----------------------------
+#     # 7. Visualize scaled object
+#     # -----------------------------
+#     o3d.visualization.draw_geometries([object_only_pcd])
+#     plt.show()
+
+
+# # Original + scale
+# if __name__ == "__main__": 
+#     cb = Checkerboard() 
+#     cb.read_ims("images/sat_checkerboard_pgm") 
+#     # cb.undistort_ims(grid_size=(8,6), cell_size=0.116)
+#     cb.undistort_ims(grid_size=(3, 3), cell_size=0.016)
+#     cb.plot_checkerboards() 
+
+#     # Example reconstructed checkerboard points (arbitrary scale)
+#     reconstructed_points = np.random.rand(48, 3)  # just an example placeholder
+
+#     # Compute and apply scale
+#     scale = cb.compute_scale(reconstructed_points)
+#     reconstructed_points_scaled = cb.apply_scale(reconstructed_points, scale)
+        
+#     plt.show()
 
 
  
