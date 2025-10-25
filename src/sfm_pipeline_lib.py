@@ -130,6 +130,7 @@ class StrcFromMotion:
         pcd = o3d.io.read_point_cloud( path ) 
         
         # Apply radis outlier removal 
+        # TODO - tune radius and points, or replace with statistical outlier 
         cl, ind = pcd.remove_radius_outlier( nb_points = nb_points, radius = radius )
         
         # Extract the inlier point cloud

@@ -233,18 +233,140 @@ class Checkerboard:
         assert points.shape[1] == 3, "points must be Nx3"
         return points * scale_factor
 
+
+
+# if __name__ == "__main__":
+#     import open3d as o3d
+#     import numpy as np
+#     from sklearn.cluster import KMeans
+#     import matplotlib.pyplot as plt
+#     import colorsys
+
+#     # -----------------------------
+#     # 1. Load point cloud
+#     # -----------------------------
+#     pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
+#     points = np.asarray(pcd.points)
+#     colors = np.asarray(pcd.colors)  # RGB in [0,1]
+#     print(f"Loaded point cloud with {points.shape[0]} points")
+
+#     # -----------------------------
+#     # 2. Convert RGB to HSV
+#     # -----------------------------
+#     hsv_colors = np.array([colorsys.rgb_to_hsv(r, g, b) for r, g, b in colors])
+    
+#     # Plot HSV distribution
+#     fig, axs = plt.subplots(1,3, figsize=(15,4))
+#     axs[0].hist(hsv_colors[:,0], bins=50, color='r')
+#     axs[0].set_title("Hue")
+#     axs[1].hist(hsv_colors[:,1], bins=50, color='g')
+#     axs[1].set_title("Saturation")
+#     axs[2].hist(hsv_colors[:,2], bins=50, color='b')
+#     axs[2].set_title("Value")
+#     plt.show()
+
+#     # -----------------------------
+#     # 3. HSV thresholding
+#     # -----------------------------
+#     H_min, H_max = 0.1, 0.2
+#     S_min, S_max = 0.5, 1.0
+#     V_min, V_max = 0.2, 1.0
+
+#     mask = ((hsv_colors[:,0] >= H_min) & (hsv_colors[:,0] <= H_max) &
+#             (hsv_colors[:,1] >= S_min) & (hsv_colors[:,1] <= S_max) &
+#             (hsv_colors[:,2] >= V_min) & (hsv_colors[:,2] <= V_max))
+    
+#     filtered_points = points[mask]
+#     filtered_colors = colors[mask]
+#     print(f"Filtered to {filtered_points.shape[0]} points based on HSV")
+
+#     filtered_pcd = o3d.geometry.PointCloud()
+#     filtered_pcd.points = o3d.utility.Vector3dVector(filtered_points)
+#     filtered_pcd.colors = o3d.utility.Vector3dVector(filtered_colors)
+#     o3d.visualization.draw_geometries([filtered_pcd], window_name="Filtered Points by HSV")
+
+#     # -----------------------------
+#     # 4. Cluster filtered points (k=2)
+#     # -----------------------------
+#     kmeans = KMeans(n_clusters=2, random_state=42).fit(filtered_points)
+#     labels = kmeans.labels_
+    
+#     centroids = kmeans.cluster_centers_
+#     print(f"Centroids:\n{centroids}")
+    
+#     cluster_pcds = []
+#     colors_palette = [[1,0,0], [0,1,0]]  # for visualization
+#     for i in range(2):
+#         cluster_points = filtered_points[labels==i]
+#         pcd_cluster = o3d.geometry.PointCloud()
+#         pcd_cluster.points = o3d.utility.Vector3dVector(cluster_points)
+#         pcd_cluster.paint_uniform_color(colors_palette[i])
+#         cluster_pcds.append(pcd_cluster)
+
+#     # -----------------------------
+#     # 5. Draw line between centroids
+#     # -----------------------------
+#     line_points = centroids
+#     lines = [[0,1]]
+#     line_set = o3d.geometry.LineSet(
+#         points=o3d.utility.Vector3dVector(line_points),
+#         lines=o3d.utility.Vector2iVector(lines)
+#     )
+#     line_set.paint_uniform_color([1,1,0])  # yellow line
+
+#     o3d.visualization.draw_geometries(cluster_pcds + [line_set], window_name="Clusters with Centroid Line")
+
+#     # -----------------------------
+#     # 6. Compute distance and scale factor
+#     # -----------------------------
+#     known_distance = 0.05  # meters, for example
+#     measured_distance = np.linalg.norm(centroids[0] - centroids[1])
+#     scale_factor = known_distance / measured_distance
+#     print(f"Measured distance: {measured_distance:.6f} → Scale factor: {scale_factor:.6f}")
+
+#     # -----------------------------
+#     # 7. Apply scale to entire point cloud
+#     # -----------------------------
+#     points_scaled = points * scale_factor
+#     scaled_pcd = o3d.geometry.PointCloud()
+#     scaled_pcd.points = o3d.utility.Vector3dVector(points_scaled)
+#     scaled_pcd.colors = o3d.utility.Vector3dVector(colors)
+#     print("Applied metric scaling to full point cloud.")
+
+#     # Visualize scaled point cloud
+#     scaled_cluster_pcds = []
+#     for i in range(2):
+#         cluster_points_scaled = filtered_points[labels==i] * scale_factor
+#         pcd_cluster_scaled = o3d.geometry.PointCloud()
+#         pcd_cluster_scaled.points = o3d.utility.Vector3dVector(cluster_points_scaled)
+#         pcd_cluster_scaled.paint_uniform_color(colors_palette[i])
+#         scaled_cluster_pcds.append(pcd_cluster_scaled)
+
+#     scaled_line_set = o3d.geometry.LineSet(
+#         points=o3d.utility.Vector3dVector(centroids * scale_factor),
+#         lines=o3d.utility.Vector2iVector([[0,1]])
+#     )
+#     scaled_line_set.paint_uniform_color([1,1,0])
+
+#     o3d.visualization.draw_geometries([scaled_pcd] + scaled_cluster_pcds + [scaled_line_set],
+#                                       window_name="Scaled Point Cloud with Centroid Line")
+
+
+
+# K means clsutering with planar detection TODO or add in z height detection since plane should be consistent?
 if __name__ == "__main__":
     import open3d as o3d
     import numpy as np
     from sklearn.neighbors import NearestNeighbors
+    from sklearn.cluster import KMeans
     import matplotlib.pyplot as plt
 
     # -----------------------------
     # 1. Calibrate camera using checkerboard images
     # -----------------------------
-    cb = Checkerboard() 
-    cb.read_ims("images/sat_checkerboard_pgm") 
-    cb.undistort_ims(grid_size=(3, 3), cell_size=0.016)  # 4x4 internal corners, 16 mm cells
+    cb = Checkerboard()
+    cb.read_ims("images/sat_checkerboard_pgm")
+    cb.undistort_ims(grid_size=(3, 3), cell_size=0.016)  
     cb.plot_checkerboards()
 
     # -----------------------------
@@ -255,74 +377,373 @@ if __name__ == "__main__":
     print(f"Loaded point cloud with {points.shape[0]} points")
 
     # -----------------------------
-    # 3. Detect checkerboard plane automatically using RANSAC
+    # 3. Segment point cloud using K-means clustering (3 clusters)
     # -----------------------------
-    plane_model, inliers = pcd.segment_plane(
-        distance_threshold=0.002,  # adjust if needed
-        ransac_n=3,
-        num_iterations=1000
-    )
+    kmeans = KMeans(n_clusters=3, random_state=42).fit(points)
+    labels = kmeans.labels_
 
-    # Separate inliers (checkerboard) and outliers (everything else)
-    checkerboard_pcd = pcd.select_by_index(inliers)
-    checkerboard_points = np.asarray(checkerboard_pcd.points)
-    object_only_pcd = pcd.select_by_index(inliers, invert=True)
-    print(f"Detected {checkerboard_points.shape[0]} points on checkerboard plane")
+    clusters = []
+    colors = [[1, 0, 0], [0, 1, 0], [0, 0, 1]]  # Red, Green, Blue
 
-    # -----------------------------
-    # Visualize the detected plane vs rest of point cloud
-    # -----------------------------
-    checkerboard_colored = checkerboard_pcd.paint_uniform_color([1, 0, 0])  # red = checkerboard
-    object_colored = object_only_pcd.paint_uniform_color([0.6, 0.6, 0.6])  # grey = object
+    for i in range(3):
+        cluster_points = points[labels == i]
+        pcd_cluster = o3d.geometry.PointCloud()
+        pcd_cluster.points = o3d.utility.Vector3dVector(cluster_points)
+        pcd_cluster.paint_uniform_color(colors[i])
+        clusters.append((cluster_points, pcd_cluster))
+        print(f"Cluster {i}: {cluster_points.shape[0]} points")
+
     o3d.visualization.draw_geometries(
-        [checkerboard_colored, object_colored],
-        window_name="Detected Checkerboard Plane (Red)"
+        [pcd for _, pcd in clusters],
+        window_name="K-means Clusters (R/G/B)"
     )
 
     # -----------------------------
-    # 4. Compute reconstructed cell size (mean nearest neighbor distance)
+    # 4. Identify checkerboard candidate by planarity (keep original color)
     # -----------------------------
+    best_plane_score = float("inf")
+    checkerboard_points = None
+    checkerboard_color = None  # store cluster color
+
+    for i, (cluster_points, pcd_cluster) in enumerate(clusters):
+        if len(cluster_points) < 10:
+            continue  # ignore tiny clusters (noise)
+
+        try:
+            plane_model, inliers = pcd_cluster.segment_plane(
+                distance_threshold=0.002,
+                ransac_n=3,
+                num_iterations=500
+            )
+            inlier_ratio = len(inliers) / len(cluster_points)
+            print(f"Cluster {i}: Plane inlier ratio = {inlier_ratio:.2f}")
+
+            # Smaller inlier ratio → better plane? (depends on scoring)
+            if inlier_ratio < best_plane_score:
+                checkerboard_points = np.asarray(pcd_cluster.select_by_index(inliers).points)
+                best_plane_score = inlier_ratio
+                best_plane_idx = i
+                checkerboard_color = colors[i]  # keep cluster color
+
+        except Exception as e:
+            print(f"Cluster {i} plane fitting failed: {e}")
+
+    # -----------------------------
+    # 5. Visualize checkerboard plane with original cluster color
+    # -----------------------------
+    # Compute mean nearest-neighbor spacing immediately
     nbrs = NearestNeighbors(n_neighbors=2).fit(checkerboard_points)
-    distances, indices = nbrs.kneighbors(checkerboard_points)
-    mean_cell_recon = np.mean(distances[:, 1])  # skip self-distance
-    print(f"Mean reconstructed cell size: {mean_cell_recon:.6f} (arbitrary units)")
+    distances, _ = nbrs.kneighbors(checkerboard_points)
+    mean_cell_recon = np.mean(distances[:, 1])
+    print(f"Mean reconstructed cell spacing: {mean_cell_recon:.6f} (arbitrary units)")
+    
+    checkerboard_pcd = o3d.geometry.PointCloud()
+    checkerboard_pcd.points = o3d.utility.Vector3dVector(checkerboard_points)
+    checkerboard_pcd.paint_uniform_color(checkerboard_color)  # use original cluster color
 
-    # Visualize nearest-neighbor connections on checkerboard
-    lines = []
-    for i in range(len(checkerboard_points)):
-        neighbor_idx = indices[i, 1]
-        lines.append([i, neighbor_idx])
-    line_set = o3d.geometry.LineSet(
-        points=o3d.utility.Vector3dVector(checkerboard_points),
-        lines=o3d.utility.Vector2iVector(lines),
-    )
-    line_set.paint_uniform_color([0, 0, 1])  # blue lines = neighbor pairs
     o3d.visualization.draw_geometries(
-        [checkerboard_colored, line_set],
-        window_name="Nearest Neighbor Links (for Scale Estimation)"
+        [checkerboard_pcd],
+        window_name=f"Detected Checkerboard Plane (Original Cluster Color)"
     )
+
+
+    # # -----------------------------
+    # # 4. Identify checkerboard candidate by planarity
+    # # -----------------------------
+    # best_plane_score = float("inf")
+    # checkerboard_points = None
+
+    # for i, (cluster_points, pcd_cluster) in enumerate(clusters):
+    #     if len(cluster_points) < 10:
+    #         continue  # ignore tiny clusters (noise)
+
+    #     # Fit plane to each cluster
+    #     try:
+    #         plane_model, inliers = pcd_cluster.segment_plane(
+    #             distance_threshold=0.002,
+    #             ransac_n=3,
+    #             num_iterations=500
+    #         )
+    #         # Ratio for how many points fitted into plane 
+    #         inlier_ratio = len(inliers) / len(cluster_points)
+    #         print(f"Cluster {i}: Plane inlier ratio = {inlier_ratio:.2f}")
+
+    #         # Higher inlier ratio = more planar → likely checkerboard
+    #         # TODO Need justification for 0.8? - inlier_ratio > 0.8 and 
+    #         # Just take relative best one
+    #         if inlier_ratio < best_plane_score:
+    #             checkerboard_points = np.asarray(pcd_cluster.select_by_index(inliers).points)
+    #             best_plane_score = inlier_ratio
+    #             best_plane_idx = i
+    #     except Exception as e:
+    #         print(f"Cluster {i} plane fitting failed: {e}")
+
+    # # TODO delete
+    # if checkerboard_points is None:
+    #     print("No strong planar checkerboard cluster found. Try adjusting RANSAC parameters.")
+    #     exit()
+
+    # print(f"Selected Cluster {best_plane_idx} as checkerboard candidate ({checkerboard_points.shape[0]} pts)")
+
+    # # -----------------------------
+    # # 5. Compute mean nearest-neighbor spacing (reconstructed cell size)
+    # # -----------------------------
+    # nbrs = NearestNeighbors(n_neighbors=2).fit(checkerboard_points)
+    # distances, _ = nbrs.kneighbors(checkerboard_points)
+    # mean_cell_recon = np.mean(distances[:, 1])
+    # print(f"Mean reconstructed cell spacing: {mean_cell_recon:.6f} (arbitrary units)")
+
+    # # Visualize checkerboard plane
+    # checkerboard_pcd = o3d.geometry.PointCloud()
+    # checkerboard_pcd.points = o3d.utility.Vector3dVector(checkerboard_points)
+    # checkerboard_pcd.paint_uniform_color([0, 0, 1])
+    # o3d.visualization.draw_geometries(
+    #     [checkerboard_pcd],
+    #     window_name="Detected Checkerboard Plane (Blue)"
+    # )
 
     # -----------------------------
-    # 5. Compute scale factor using Checkerboard method
+    # 6. Compute scale factor from checkerboard
     # -----------------------------
     scale_factor = cb.compute_scale(np.array([[0, 0, 0], [mean_cell_recon, 0, 0]]))
-    print(f"Computed scale factor from checkerboard: {scale_factor:.6f}")
+    print(f"Computed scale factor: {scale_factor:.6f}")
 
     # -----------------------------
-    # 6. Apply scale to entire point cloud
+    # 7. Apply scale factor to entire point cloud
     # -----------------------------
     points_scaled = points * scale_factor
-    pcd.points = o3d.utility.Vector3dVector(points_scaled)
-    object_only_pcd = pcd.select_by_index(inliers, invert=True)
-    print(f"Applied metric scale to point cloud")
+    scaled_pcd = o3d.geometry.PointCloud()
+    scaled_pcd.points = o3d.utility.Vector3dVector(points_scaled)
+    print("Applied metric scaling to point cloud.")
 
     # -----------------------------
-    # 7. Visualize scaled object
+    # 8. Visualize scaled result (checkerboard + object)
     # -----------------------------
+    scaled_checkerboard = o3d.geometry.PointCloud()
+    scaled_checkerboard.points = o3d.utility.Vector3dVector(checkerboard_points * scale_factor)
+    scaled_checkerboard.paint_uniform_color([0, 0, 1])
+
     o3d.visualization.draw_geometries(
-        [object_only_pcd],
-        window_name="Scaled Object (Checkerboard Removed)"
+        [scaled_pcd, scaled_checkerboard],
+        window_name="Scaled Cloud (Blue = Checkerboard)"
     )
+
+
+
+# # K means clustering - 1 cluster was satellite body + solar panel, other cluster was checkerboard and solar panel
+# if __name__ == "__main__":
+#     import open3d as o3d
+#     import numpy as np
+#     import matplotlib.pyplot as plt
+#     from sklearn.cluster import KMeans
+#     from sklearn.neighbors import NearestNeighbors
+
+#     # -----------------------------
+#     # 1. Calibrate camera using checkerboard images
+#     # -----------------------------
+#     cb = Checkerboard()
+#     cb.read_ims("images/sat_checkerboard_pgm")
+#     cb.undistort_ims(grid_size=(3, 3), cell_size=0.016)  # 4x4 internal corners, 16 mm cells
+#     cb.plot_checkerboards()
+
+#     # -----------------------------
+#     # 2. Load point cloud (object + checkerboard)
+#     # -----------------------------
+#     pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
+#     points = np.asarray(pcd.points)
+#     print(f"Loaded point cloud with {points.shape[0]} points")
+
+#     # -----------------------------
+#     # 3. Segment point cloud using K-means clustering
+#     # -----------------------------
+#     kmeans = KMeans(n_clusters=2, random_state=42, n_init=10).fit(points)
+#     labels = kmeans.labels_
+
+#     # Separate clusters
+#     cluster1 = points[labels == 0]
+#     cluster2 = points[labels == 1]
+#     print(f"Cluster 1: {cluster1.shape[0]} points")
+#     print(f"Cluster 2: {cluster2.shape[0]} points")
+
+#     # Visualize both clusters (red vs green)
+#     pcd_cluster1 = o3d.geometry.PointCloud()
+#     pcd_cluster1.points = o3d.utility.Vector3dVector(cluster1)
+#     pcd_cluster1.paint_uniform_color([1, 0, 0])  # red
+
+#     pcd_cluster2 = o3d.geometry.PointCloud()
+#     pcd_cluster2.points = o3d.utility.Vector3dVector(cluster2)
+#     pcd_cluster2.paint_uniform_color([0, 1, 0])  # green
+
+#     o3d.visualization.draw_geometries(
+#         [pcd_cluster1, pcd_cluster2],
+#         window_name="K-means clusters (Red vs Green)"
+#     )
+
+#     # -----------------------------
+#     # 4. Pick smaller cluster as checkerboard
+#     # -----------------------------
+#     if cluster1.shape[0] < cluster2.shape[0]:
+#         checkerboard_points = cluster1
+#         object_points = cluster2
+#     else:
+#         checkerboard_points = cluster2
+#         object_points = cluster1
+
+#     print(f"Selected checkerboard cluster with {checkerboard_points.shape[0]} points")
+
+#     # -----------------------------
+#     # 5. Compute reconstructed cell size (mean nearest neighbor distance)
+#     # -----------------------------
+#     nbrs = NearestNeighbors(n_neighbors=2).fit(checkerboard_points)
+#     distances, indices = nbrs.kneighbors(checkerboard_points)
+#     mean_cell_recon = np.mean(distances[:, 1])  # skip self-distance
+#     print(f"Mean reconstructed cell size: {mean_cell_recon:.6f} (arbitrary units)")
+
+#     # -----------------------------
+#     # 6. Visualize nearest-neighbor connections on checkerboard
+#     # -----------------------------
+#     lines = [[i, indices[i, 1]] for i in range(len(checkerboard_points))]
+#     line_set = o3d.geometry.LineSet(
+#         points=o3d.utility.Vector3dVector(checkerboard_points),
+#         lines=o3d.utility.Vector2iVector(lines),
+#     )
+#     line_set.paint_uniform_color([0, 0, 1])  # blue lines
+
+#     checkerboard_pcd = o3d.geometry.PointCloud()
+#     checkerboard_pcd.points = o3d.utility.Vector3dVector(checkerboard_points)
+#     checkerboard_pcd.paint_uniform_color([0, 0, 1])  # blue
+#     object_pcd = o3d.geometry.PointCloud()
+#     object_pcd.points = o3d.utility.Vector3dVector(object_points)
+#     object_pcd.paint_uniform_color([0.7, 0.7, 0.7])  # gray
+
+#     o3d.visualization.draw_geometries(
+#         [checkerboard_pcd, line_set],
+#         window_name="Nearest Neighbor Links (Scale Estimation)"
+#     )
+
+#     # -----------------------------
+#     # 7. Compute scale factor using Checkerboard class
+#     # -----------------------------
+#     scale_factor = cb.compute_scale(np.array([[0, 0, 0], [mean_cell_recon, 0, 0]]))
+#     print(f"Computed scale factor from checkerboard: {scale_factor:.6f}")
+
+#     # -----------------------------
+#     # 8. Apply scale to entire point cloud
+#     # -----------------------------
+#     points_scaled = points * scale_factor
+#     scaled_pcd = o3d.geometry.PointCloud()
+#     scaled_pcd.points = o3d.utility.Vector3dVector(points_scaled)
+#     print("Applied metric scale to point cloud")
+
+#     # -----------------------------
+#     # 9. Remove checkerboard points (keep object only)
+#     # -----------------------------
+#     object_scaled_points = object_points * scale_factor
+#     object_only_pcd = o3d.geometry.PointCloud()
+#     object_only_pcd.points = o3d.utility.Vector3dVector(object_scaled_points)
+
+#     print(f"Remaining points (object only): {object_scaled_points.shape[0]}")
+
+#     # -----------------------------
+#     # 10. Visualize scaled object (checkerboard removed)
+#     # -----------------------------
+#     o3d.visualization.draw_geometries(
+#         [object_only_pcd],
+#         window_name="Scaled Object (Checkerboard Removed)"
+#     )
+
+
+# RANSAC
+# if __name__ == "__main__":
+#     import open3d as o3d
+#     import numpy as np
+#     from sklearn.neighbors import NearestNeighbors
+#     import matplotlib.pyplot as plt
+
+#     # -----------------------------
+#     # 1. Calibrate camera using checkerboard images
+#     # -----------------------------
+#     cb = Checkerboard() 
+#     cb.read_ims("images/sat_checkerboard_pgm") 
+#     cb.undistort_ims(grid_size=(3, 3), cell_size=0.016)  # 4x4 internal corners, 16 mm cells
+#     cb.plot_checkerboards()
+
+#     # -----------------------------
+#     # 2. Load point cloud (object + checkerboard)
+#     # -----------------------------
+#     pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
+#     points = np.asarray(pcd.points)
+#     print(f"Loaded point cloud with {points.shape[0]} points")
+
+#     # -----------------------------
+#     # 3. Detect checkerboard plane automatically using RANSAC
+#     # -----------------------------
+#     plane_model, inliers = pcd.segment_plane(
+#         distance_threshold=0.002,  # adjust if needed
+#         ransac_n=3,
+#         num_iterations=1000
+#     )
+
+#     # Separate inliers (checkerboard) and outliers (everything else)
+#     checkerboard_pcd = pcd.select_by_index(inliers)
+#     checkerboard_points = np.asarray(checkerboard_pcd.points)
+#     object_only_pcd = pcd.select_by_index(inliers, invert=True)
+#     print(f"Detected {checkerboard_points.shape[0]} points on checkerboard plane")
+
+#     # -----------------------------
+#     # Visualize the detected plane vs rest of point cloud
+#     # -----------------------------
+#     checkerboard_colored = checkerboard_pcd.paint_uniform_color([1, 0, 0])  # red = checkerboard
+#     object_colored = object_only_pcd.paint_uniform_color([0.6, 0.6, 0.6])  # grey = object
+#     o3d.visualization.draw_geometries(
+#         [checkerboard_colored, object_colored],
+#         window_name="Detected Checkerboard Plane (Red)"
+#     )
+
+#     # -----------------------------
+#     # 4. Compute reconstructed cell size (mean nearest neighbor distance)
+#     # -----------------------------
+#     nbrs = NearestNeighbors(n_neighbors=2).fit(checkerboard_points)
+#     distances, indices = nbrs.kneighbors(checkerboard_points)
+#     mean_cell_recon = np.mean(distances[:, 1])  # skip self-distance
+#     print(f"Mean reconstructed cell size: {mean_cell_recon:.6f} (arbitrary units)")
+
+#     # Visualize nearest-neighbor connections on checkerboard
+#     lines = []
+#     for i in range(len(checkerboard_points)):
+#         neighbor_idx = indices[i, 1]
+#         lines.append([i, neighbor_idx])
+#     line_set = o3d.geometry.LineSet(
+#         points=o3d.utility.Vector3dVector(checkerboard_points),
+#         lines=o3d.utility.Vector2iVector(lines),
+#     )
+#     line_set.paint_uniform_color([0, 0, 1])  # blue lines = neighbor pairs
+#     o3d.visualization.draw_geometries(
+#         [checkerboard_colored, line_set],
+#         window_name="Nearest Neighbor Links (for Scale Estimation)"
+#     )
+
+#     # -----------------------------
+#     # 5. Compute scale factor using Checkerboard method
+#     # -----------------------------
+#     scale_factor = cb.compute_scale(np.array([[0, 0, 0], [mean_cell_recon, 0, 0]]))
+#     print(f"Computed scale factor from checkerboard: {scale_factor:.6f}")
+
+#     # -----------------------------
+#     # 6. Apply scale to entire point cloud
+#     # -----------------------------
+#     points_scaled = points * scale_factor
+#     pcd.points = o3d.utility.Vector3dVector(points_scaled)
+#     object_only_pcd = pcd.select_by_index(inliers, invert=True)
+#     print(f"Applied metric scale to point cloud")
+
+#     # -----------------------------
+#     # 7. Visualize scaled object
+#     # -----------------------------
+#     o3d.visualization.draw_geometries(
+#         [object_only_pcd],
+#         window_name="Scaled Object (Checkerboard Removed)"
+#     )
 
 
 
