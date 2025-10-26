@@ -210,7 +210,7 @@ if __name__ == "__main__":
     # Calibrate camera and visualize how the checkerboard (and therefore the camera) 
     # moved between images
     cb = Checkerboard() 
-    cb.read_ims("images/hanging_sat_checkerboard_pgm") 
+    cb.read_ims("images/hanging_sat_checkerboard_sfm")  # ... pgm
     cb.undistort_ims(grid_size=(3, 3), cell_size=0.096)
     cb.plot_checkerboards() 
     
