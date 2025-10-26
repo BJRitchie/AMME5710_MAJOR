@@ -110,46 +110,102 @@ if __name__ == "__main__":
     mask = ((hsv_colors[:,0] >= H_min) & (hsv_colors[:,0] <= H_max) &
             (hsv_colors[:,1] >= S_min) & (hsv_colors[:,1] <= S_max) &
             (hsv_colors[:,2] >= V_min) & (hsv_colors[:,2] <= V_max))
-    
+
     filtered_points = points[mask]
-    filtered_colors = colors[mask]
     print(f"Filtered to {filtered_points.shape[0]} points based on HSV")
 
-    filtered_pcd = o3d.geometry.PointCloud()
-    filtered_pcd.points = o3d.utility.Vector3dVector(filtered_points)
-    filtered_pcd.colors = o3d.utility.Vector3dVector(filtered_colors)
-    o3d.visualization.draw_geometries([filtered_pcd], window_name="Filtered Points by HSV")
+    all_pcd = o3d.geometry.PointCloud()
+    all_pcd.points = o3d.utility.Vector3dVector(points)
 
-    # -----------------------------
-    # Cluster filtered points (k=2)
-    # -----------------------------
-    kmeans = KMeans(n_clusters=2, random_state=42).fit(filtered_points)
-    labels = kmeans.labels_
+    # Default all points as light grey
+    grey_colors = np.ones_like(points) * 0.7
+
+    # Highlight thresholded points in red
+    grey_colors[mask] = [1.0, 0.0, 0.0]
+
+    all_pcd.colors = o3d.utility.Vector3dVector(grey_colors)
+
+    o3d.visualization.draw_geometries([all_pcd], window_name="Red Threshold Points Among Grey Background")
+
+
+    # filtered_points = points[mask]
+    # filtered_colors = colors[mask]
+    # print(f"Filtered to {filtered_points.shape[0]} points based on HSV")
+
+    # TODO Change to plot other points as light grey 
+    # filtered_pcd = o3d.geometry.PointCloud()
+    # filtered_pcd.points = o3d.utility.Vector3dVector(filtered_points)
+    # filtered_pcd.colors = o3d.utility.Vector3dVector(filtered_colors)
+    # o3d.visualization.draw_geometries([filtered_pcd], window_name="Filtered Points by HSV")
+
+    # # -----------------------------
+    # # Cluster filtered points (k=2)
+    # # -----------------------------
+    # kmeans = KMeans(n_clusters=2, random_state=42).fit(filtered_points)
+    # labels = kmeans.labels_
+
+    # centroids = kmeans.cluster_centers_
+    # print(f"Centroids:\n{centroids}")
     
-    centroids = kmeans.cluster_centers_
-    print(f"Centroids:\n{centroids}")
-    
-    cluster_pcds = []
-    colors_palette = [[1,0,0], [0,1,0]]  # for visualization
-    for i in range(2):
-        cluster_points = filtered_points[labels==i]
-        pcd_cluster = o3d.geometry.PointCloud()
-        pcd_cluster.points = o3d.utility.Vector3dVector(cluster_points)
-        pcd_cluster.paint_uniform_color(colors_palette[i])
-        cluster_pcds.append(pcd_cluster)
+    # cluster_pcds = []
+    # colors_palette = [[1,0,0], [0,1,0]]  # for visualization
+    # for i in range(2):
+    #     cluster_points = filtered_points[labels==i]
+    #     pcd_cluster = o3d.geometry.PointCloud()
+    #     pcd_cluster.points = o3d.utility.Vector3dVector(cluster_points)
+    #     pcd_cluster.paint_uniform_color(colors_palette[i])
+    #     cluster_pcds.append(pcd_cluster)
 
-    # -----------------------------
-    # Draw line between centroids
-    # -----------------------------
-    line_points = centroids
-    lines = [[0,1]]
-    line_set = o3d.geometry.LineSet(
-        points=o3d.utility.Vector3dVector(line_points),
-        lines=o3d.utility.Vector2iVector(lines)
-    )
-    line_set.paint_uniform_color([0, 0, 0])  # black line
+    # # -----------------------------
+    # # Draw line between centroids
+    # # -----------------------------
+    # line_points = centroids
+    # lines = [[0,1]]
+    # line_set = o3d.geometry.LineSet(
+    #     points=o3d.utility.Vector3dVector(line_points),
+    #     lines=o3d.utility.Vector2iVector(lines)
+    # )
+    # line_set.paint_uniform_color([0, 0, 0])  # black line
 
-    o3d.visualization.draw_geometries(cluster_pcds + [line_set], window_name="Clusters with Centroid Line")
+    # o3d.visualization.draw_geometries(cluster_pcds + [line_set], window_name="Clusters with Centroid Line")
+
+
+    if filtered_points.shape[0] >= 2:
+        kmeans = KMeans(n_clusters=2, random_state=42).fit(filtered_points)
+        labels = kmeans.labels_
+        centroids = kmeans.cluster_centers_
+        print(f"Centroids:\n{centroids}")
+
+        # -----------------------------
+        # Combine clusters + background for visualization
+        # -----------------------------
+        cluster_colors = np.ones_like(points) * 0.7  # start grey
+
+        # Label cluster points red & green
+        cluster_colors[mask] = [1, 0, 0]  # start as red
+        cluster_colors[mask][labels == 1] = [0, 1, 0]  # second cluster green
+
+        cluster_pcd = o3d.geometry.PointCloud()
+        cluster_pcd.points = o3d.utility.Vector3dVector(points)
+        cluster_pcd.colors = o3d.utility.Vector3dVector(cluster_colors)
+
+        # Line between centroids
+        line_points = centroids
+        lines = [[0, 1]]
+        line_set = o3d.geometry.LineSet(
+            points=o3d.utility.Vector3dVector(line_points),
+            lines=o3d.utility.Vector2iVector(lines)
+        )
+        line_set.paint_uniform_color([0, 0, 0])  # black line
+
+        o3d.visualization.draw_geometries([cluster_pcd, line_set],
+                                        window_name="Clusters (Red & Green) Among Grey Background")
+    else:
+        print("Not enough points to cluster.")
+
+
+
+
 
     # -----------------------------
     # Compute distance and scale factor
