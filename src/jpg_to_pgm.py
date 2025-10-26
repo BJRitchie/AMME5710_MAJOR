@@ -2,10 +2,17 @@ import cv2
 import os
 import glob
 
+from file_reading_lib import gen_images_from_vid 
+
+# Convert the video into images 
+vid_path = 'images/hanging_sat_checkerboard.mp4'
+store_path="images/hanging_sat_checkerboard"
+gen_images_from_vid( vid_path, store_path ) 
+
 # Input folder with JPG images
-input_folder = "images/checkerboard_test"
+input_folder = "images/hanging_sat_checkerboard"
 # Output folder for PGM images
-output_folder = "images/checkerboard_test_pgm"
+output_folder = "images/hanging_sat_checkerboard_pgm"
 os.makedirs(output_folder, exist_ok=True)
 
 # Find all JPG/JPEG files
