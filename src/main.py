@@ -6,6 +6,8 @@ import sfm_pipeline_lib as pipeline
 from file_reading_lib import gen_images_from_vid 
 import checkerboard_lib as checkerboard
 
+from plot_pointcloud_testing import plot_pointcloud
+
 # # Convert the video into images 
 # vid_path = 'images/small_checker_spin.mp4'
 # store_path="images/small_checker_spin"
@@ -168,14 +170,36 @@ for T in T_sat_to_cam_list:
 # ---------------------------------------------------------
 # Compute and Apply Scale
 # ---------------------------------------------------------
-sfm_t_array = np.hstack([t for t in sfm_translations])               # 3 x N
-cb_t_array  = np.hstack([T[:3, 3:] for T in T_sat_to_cam_list])      # 3 x N
+# sfm_t_array = np.hstack([t for t in sfm_translations])               # 3 x N
+# cb_t_array  = np.hstack([T[:3, 3:] for T in T_sat_to_cam_list])      # 3 x N
 
-s = np.sum(cb_t_array * sfm_t_array) / np.sum(sfm_t_array**2)
-print(f"Estimated scale factor: {s:.4f}")
+# s = np.sum(cb_t_array * sfm_t_array) / np.sum(sfm_t_array**2)
+# print(f"Estimated scale factor: {s:.4f}")
+
+# sfm_translations_scaled = [s * t for t in sfm_translations]
+
+
+sfm_t_array = np.hstack([t for t in sfm_translations])           # 3 x N
+cb_t_array  = np.hstack([T[:3, 3:] for T in T_sat_to_cam_list])  # 3 x N
+
+# Center around first camera to remove origin offset
+sfm_t_array_centered = sfm_t_array - sfm_t_array[:, [0]]
+cb_t_array_centered  = cb_t_array - cb_t_array[:, [0]]
+
+# Compute scale factor using centered translations
+s = np.sum(cb_t_array_centered * sfm_t_array_centered) / np.sum(sfm_t_array_centered**2)
+
+# After computing R_align, t_align, and s
+print(f"Estimated scale factor: {s}")
+
+# --- Fix for negative scale or reflection ---
+if s < 0:
+    print("Negative scale detected — flipping coordinate system for consistency.")
+    s = -s
+    R_cb_to_sat[:, 2] *= -1  # Flip z-axis to correct handedness/reflection
+
 
 sfm_translations_scaled = [s * t for t in sfm_translations]
-
 
 # ---------------------------------------------------------
 # 4. Compute differences between SfM and checkerboard-derived poses
@@ -219,6 +243,138 @@ print(f"Mean translation error: {np.mean(translation_diffs):.4f} m")
 
 
 
+
+# Original call
+# plot_pointcloud(
+#     sparse_path="sparse",
+#     store_path="0",
+#     camera_scale=0.1,
+#     matched_indices=matched_indices_sfm  # Only plot the SfM cameras matched to checkerboard
+# )
+
+
+
+# plot_pointcloud(
+#     sparse_path="sparse",
+#     store_path="0",
+#     camera_scale=0.1,
+#     matched_indices=matched_indices_sfm,
+#     translations_scaled=sfm_translations_scaled,
+#     scale_pointcloud=s
+# )
+
+plot_pointcloud("sparse", store_path="0", camera_scale=0.1, matched_indices=matched_indices_sfm)
+
+
+
+
+
+
+
+
+
+
+# import open3d as o3d
+# import pycolmap
+# import numpy as np
+# import os
+
+# # ---------------------------------------------------------
+# # 1. Load and scale SfM point cloud
+# # ---------------------------------------------------------
+# print("=== Loading and scaling SfM point cloud ===")
+# sfm_path = "sparse/0"
+# pcd = o3d.io.read_point_cloud(os.path.join(sfm_path, "points.ply"))
+
+# points = np.asarray(pcd.points)
+# colors = np.asarray(pcd.colors)
+# points_scaled = points * s  # Apply scale factor
+
+# scaled_pcd = o3d.geometry.PointCloud()
+# scaled_pcd.points = o3d.utility.Vector3dVector(points_scaled)
+# scaled_pcd.colors = o3d.utility.Vector3dVector(colors)
+
+
+# # ---------------------------------------------------------
+# # 2. Visualize raw SfM reconstruction (world frame)
+# # ---------------------------------------------------------
+# print("\n=== Visualizing original SfM reconstruction ===")
+# plot_pointcloud(
+#     sparse_path="sparse",     # Path to parent folder
+#     store_path="0",           # Subfolder name
+#     camera_scale=0.1          # Frustum/axis scale
+# )
+
+
+# # ---------------------------------------------------------
+# # 3. Build transformed point cloud (aligned to checkerboard frame)
+# # ---------------------------------------------------------
+# print("\n=== Transforming and visualizing scaled SfM point cloud in checkerboard/satellite frame ===")
+
+# # Build transformation matrices for each checkerboard pose
+# T_cb_to_sat = np.eye(4)
+# T_cb_to_sat[:3, :3] = R_cb_to_sat
+# T_cb_to_sat[:3, 3:] = t_cb_to_sat
+
+# # Transform scaled point cloud from SfM frame to satellite frame
+# # (Optional depending on how you define your alignment)
+# points_cb_frame = (R_cb_to_sat @ points_scaled.T).T + t_cb_to_sat.flatten()
+
+# cb_pcd = o3d.geometry.PointCloud()
+# cb_pcd.points = o3d.utility.Vector3dVector(points_cb_frame)
+# cb_pcd.colors = o3d.utility.Vector3dVector(colors)
+
+# # Save optional transformed cloud
+# o3d.io.write_point_cloud("checkerboard_frame_points.ply", cb_pcd)
+
+# # # ---------------------------------------------------------
+# # # 4. Visualize transformed (checkerboard-aligned) reconstruction
+# # # ---------------------------------------------------------
+# # o3d.visualization.draw_geometries(
+# #     [cb_pcd],
+# #     window_name="Scaled Point Cloud in Checkerboard/Satellite Frame",
+# #     width=1280,
+# #     height=800,
+# # )
+
+
+# # ---------------------------------------------------------
+# # 3. Add checkerboard camera poses as coordinate frames
+# # ---------------------------------------------------------
+# camera_scale = 0.1  # size of coordinate frames
+# camera_frames = []
+
+# for T_sat_cam in T_sat_to_cam_list:
+#     R_cb = T_sat_cam[:3, :3]
+#     t_cb = T_sat_cam[:3, 3].flatten()
+
+#     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=camera_scale)
+#     T_frame = np.eye(4)
+#     T_frame[:3, :3] = R_cb
+#     T_frame[:3, 3] = t_cb
+#     frame.transform(T_frame)
+
+#     camera_frames.append(frame)
+
+# # Visualize point cloud with checkerboard camera poses
+# o3d.visualization.draw_geometries(
+#     [cb_pcd, *camera_frames],
+#     window_name="Checkerboard Cameras + Scaled Point Cloud",
+#     width=1280,
+#     height=800
+# )
+
+
+
+
+
+
+
+
+
+
+
+
 # ---------------------------------------------------------
 # Load scaled SfM point cloud
 # ---------------------------------------------------------
@@ -235,8 +391,9 @@ scaled_pcd.colors = o3d.utility.Vector3dVector(colors)
 geometries = [scaled_pcd]
 
 # Frustum parameters
-camera_scale = 0.02
+camera_scale = 0.1
 frustum_depth = camera_scale * 2
+
 
 def make_camera_frustum(R, t, width=640, height=480, fx=1, fy=1, scale=frustum_depth, color=[1,0,0]):
     """Create an Open3D LineSet representing the camera frustum."""
@@ -252,11 +409,11 @@ def make_camera_frustum(R, t, width=640, height=480, fx=1, fy=1, scale=frustum_d
     corners_world = (R.T @ corners_cam.T).T + t
     lines = [[0,1],[0,2],[0,3],[0,4],[1,2],[2,3],[3,4],[4,1]]
     colors_lines = [color for _ in lines]
-    ls = o3d.geometry.LineSet()
-    ls.points = o3d.utility.Vector3dVector(corners_world)
-    ls.lines = o3d.utility.Vector2iVector(lines)
-    ls.colors = o3d.utility.Vector3dVector(colors_lines)
-    return ls
+    line_set = o3d.geometry.LineSet()
+    line_set.points = o3d.utility.Vector3dVector(corners_world)
+    line_set.lines = o3d.utility.Vector2iVector(lines)
+    line_set.colors = o3d.utility.Vector3dVector(colors_lines)
+    return line_set
 
 # ---------------------------------------------------------
 # Load SfM reconstruction
@@ -269,7 +426,6 @@ sfm_cameras = {cam_id: cam for cam_id, cam in rec.cameras.items()}
 for i in range(len(sfm_translations_scaled)):
     img = sfm_images[matched_indices_sfm[i]]  # get the corresponding SfM image
     t = sfm_translations_scaled[i].flatten()  # already matched & scaled
-    T_cb = T_sat_to_cam_list[i]
 
     R = img.cam_from_world().rotation.matrix()
 
@@ -281,12 +437,12 @@ for i in range(len(sfm_translations_scaled)):
     ls_sfm = make_camera_frustum(R, t, width, height, fx, fy, color=[1,0,0])
     geometries.append(ls_sfm)
 
-    # Checkerboard camera
-    T_cb = T_sat_to_cam_list[i]
-    R_cb = T_cb[:3,:3]
-    t_cb = T_cb[:3,3]
-    ls_cb = make_camera_frustum(R_cb, t_cb, color=[0,1,0])
-    geometries.append(ls_cb)
+    # # Checkerboard camera
+    # T_cb = T_sat_to_cam_list[i]
+    # R_cb = T_cb[:3,:3]
+    # t_cb = T_cb[:3,3]
+    # ls_cb = make_camera_frustum(R_cb, t_cb, color=[0,1,0])
+    # geometries.append(ls_cb)
 
 # ---------------------------------------------------------
 # Visualize everything
@@ -298,72 +454,121 @@ o3d.visualization.draw_geometries(
 
 
 
-# ---------------------------------------------------------
-# Add SfM camera frustums (scaled translations)
-# ---------------------------------------------------------
-# for img in sfm_images:
-#     R = img.cam_from_world().rotation.matrix()
-#     t = img.projection_center().flatten() * s  # apply scale
-#     cam = sfm_cameras[img.camera_id]
-#     fx = cam.params[0] if len(cam.params) > 0 else 1
-#     fy = cam.params[1] if len(cam.params) > 1 else fx
-#     width, height = cam.width, cam.height
 
-#     ls = make_camera_frustum(R, t, width, height, fx, fy, color=[1,0,0])
-#     geometries.append(ls)
 
-# # ---------------------------------------------------------
-# # Add checkerboard camera frustums
-# # ---------------------------------------------------------
-# for T in T_sat_to_cam_list:
-#     R_cb = T[:3,:3]
-#     t_cb = T[:3,3]
-#     ls = make_camera_frustum(R_cb, t_cb, color=[0,1,0])
-#     geometries.append(ls)
 
-# # ---------------------------------------------------------
-# # Visualize everything
-# # ---------------------------------------------------------
-# o3d.visualization.draw_geometries(
-#     geometries,
-#     window_name="Scaled Point Cloud + Camera Poses (SfM=Red, Checkerboard=Green)"
-# )
+
+
+
+
+
+
+
+
+
+
+
 
 
 
 
 # # ---------------------------------------------------------
-# # 6. Visualize scaled point cloud + camera poses together (Open3D)
+# # Load scaled SfM point cloud
 # # ---------------------------------------------------------
-# def make_frame(T, color):
-#     """Create Open3D coordinate frame geometry from a 4x4 pose matrix."""
-#     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.02)
-#     frame.paint_uniform_color(color)
-#     frame.transform(T)
-#     return frame
-
-# # Apply scale to the SfM point cloud
-# print("Load point cloud")
+# print("Load and scale point cloud")
 # pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
 # points = np.asarray(pcd.points)
 # colors = np.asarray(pcd.colors)
-# points_scaled = points * s  # scale the points
+# points_scaled = points * s  # apply scale factor
 
 # scaled_pcd = o3d.geometry.PointCloud()
 # scaled_pcd.points = o3d.utility.Vector3dVector(points_scaled)
 # scaled_pcd.colors = o3d.utility.Vector3dVector(colors)
 
-# # Build camera frames (SfM scaled, checkerboard)
-# sfm_frames = [
-#     make_frame(np.vstack([np.hstack([R, s * t]), [0, 0, 0, 1]]), [1, 0, 0])
-#     for R, t in zip(sfm_rotations, sfm_translations)
-# ]
-# cb_frames = [make_frame(T, [0, 1, 0]) for T in T_sat_to_cam_list]
+# # Prepare for visualization
+# geometries = [scaled_pcd]
 
-# # Visualize all together
+# # ---------------------------------------------------------
+# # Helper: Create camera frustum from real intrinsics
+# # ---------------------------------------------------------
+# def make_camera_frustum(R, t, width, height, fx, fy, scale=0.1, color=[1, 0, 0]):
+#     """Create an Open3D LineSet for a camera frustum using real intrinsics."""
+#     cx = width / 2
+#     cy = height / 2
+#     frustum_depth = scale * 2
+
+#     # Frustum corners in camera coordinates
+#     corners_cam = np.array([
+#         [0, 0, 0],  # Camera center
+#         [(0 - cx) * frustum_depth / fx, (0 - cy) * frustum_depth / fy, frustum_depth],
+#         [(width - cx) * frustum_depth / fx, (0 - cy) * frustum_depth / fy, frustum_depth],
+#         [(width - cx) * frustum_depth / fx, (height - cy) * frustum_depth / fy, frustum_depth],
+#         [(0 - cx) * frustum_depth / fx, (height - cy) * frustum_depth / fy, frustum_depth],
+#     ])
+
+#     # Transform frustum corners to world coordinates
+#     corners_world = (R.T @ corners_cam.T).T + t
+
+#     # Define edges of the frustum pyramid
+#     lines = [[0, 1], [0, 2], [0, 3], [0, 4],
+#              [1, 2], [2, 3], [3, 4], [4, 1]]
+
+#     # Build LineSet
+#     ls = o3d.geometry.LineSet()
+#     ls.points = o3d.utility.Vector3dVector(corners_world)
+#     ls.lines = o3d.utility.Vector2iVector(lines)
+#     ls.colors = o3d.utility.Vector3dVector([color for _ in lines])
+
+#     return ls
+
+
+# # ---------------------------------------------------------
+# # Load SfM reconstruction (for camera intrinsics & poses)
+# # ---------------------------------------------------------
+# rec = pycolmap.Reconstruction("sparse/0")
+# sfm_images = sorted(rec.images.values(), key=lambda x: x.name)
+# sfm_cameras = {cam_id: cam for cam_id, cam in rec.cameras.items()}
+
+# camera_scale = 0.1  # for visual size
+
+# # ---------------------------------------------------------
+# # Plot SfM and Checkerboard camera frustums
+# # ---------------------------------------------------------
+# for i in range(len(sfm_translations_scaled)):
+#     # --- SfM camera ---
+#     img = sfm_images[matched_indices_sfm[i]]
+#     R_sfm = img.cam_from_world().rotation.matrix()
+#     t_sfm = sfm_translations_scaled[i].flatten()  # already scaled
+
+#     cam = sfm_cameras[img.camera_id]
+#     width, height = cam.width, cam.height
+#     params = cam.params
+#     if len(params) >= 2:
+#         fx, fy = params[0], params[1]
+#     else:
+#         fx = fy = params[0] if len(params) > 0 else width
+
+#     ls_sfm = make_camera_frustum(R_sfm, t_sfm, width, height, fx, fy,
+#                                  scale=camera_scale, color=[1, 0, 0])
+#     geometries.append(ls_sfm)
+
+#     # --- Checkerboard camera ---
+#     T_cb = T_sat_to_cam_list[i]
+#     R_cb = T_cb[:3, :3]
+#     t_cb = T_cb[:3, 3]
+#     ls_cb = make_camera_frustum(R_cb, t_cb, width, height, fx, fy,
+#                                 scale=camera_scale, color=[0, 1, 0])
+#     geometries.append(ls_cb)
+
+# # ---------------------------------------------------------
+# # Visualize everything
+# # ---------------------------------------------------------
+# print(f"Visualizing {len(sfm_translations_scaled)} matched cameras")
 # o3d.visualization.draw_geometries(
-#     [scaled_pcd] + sfm_frames + cb_frames,
-#     window_name="Scaled Point Cloud + Camera Poses (SfM=Red, Checkerboard=Green)"
+#     geometries,
+#     window_name="Scaled Point Cloud + Camera Poses (SfM=Red, Checkerboard=Green)",
+#     width=1280,
+#     height=800,
 # )
 
 
