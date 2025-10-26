@@ -6,7 +6,7 @@ import sfm_pipeline_lib as pipeline
 from file_reading_lib import gen_images_from_vid 
 import checkerboard_lib as checkerboard
 
-from plot_pointcloud_testing import plot_pointcloud
+from plot_pointcloud_testing import plot_pointcloud, plot_pointcloud_checkerboard
 
 # # Convert the video into images 
 # vid_path = 'images/small_checker_spin.mp4'
@@ -99,47 +99,209 @@ checker_rotations, checker_translations = cb.get_poses()
 
 
 
+# import numpy as np
+# import open3d as o3d
+# import os
+
+# # Define transformation from checkerboard to satellite frame
+# # R_cb_to_sat = o3d.geometry.get_rotation_matrix_from_xyz([0.1, 0.0, 0.0])
+# # t_cb_to_sat = np.array([[0.05], [0.02], [0.01]])
+
+# R_cb_to_sat = np.array([
+#     [ 0.96917272, 0.0, 0.24638229],
+#     [ 0.0,        1.0, 0.0      ],
+#     [-0.24638229, 0.0, 0.96917272]
+# ])
+# t_cb_to_sat = np.array([[27.41], [0.0], [-35.25]])
+# t_cb_to_sat = t_cb_to_sat / 1000.0  # if SolidWorks outputs mm
+
+
+# # Build homogeneous transform
+# T_cb_to_sat = np.eye(4)
+# T_cb_to_sat[:3, :3] = R_cb_to_sat
+# T_cb_to_sat[:3, 3:] = t_cb_to_sat
+
+# # Convert checkerboard poses to satellite frame
+# T_sat_to_cam_list = []
+# for R_cb, t_cb in zip(checker_rotations, checker_translations):
+#     T_cb_to_cam = np.eye(4)
+#     T_cb_to_cam[:3, :3] = R_cb
+#     T_cb_to_cam[:3, 3:] = t_cb
+#     # satellite → cam = cb → cam × sat → cb⁻¹
+#     T_sat_to_cam = T_cb_to_cam @ np.linalg.inv(T_cb_to_sat)
+#     T_sat_to_cam_list.append(T_sat_to_cam)
+
+# # ---------------------------------------------------------
+# # Align SfM and Checkerboard poses by image names
+# # ---------------------------------------------------------
+# rec_path = os.path.join(sfm_pipeline._sparse_path, "0")
+# rec = pycolmap.Reconstruction(rec_path)
+# sfm_images = list(rec.images.values())  # SfM images
+
+# cb_images = cb._checker_image_names  # checkerboard-detected image filenames
+
+# matched_indices_sfm = []
+# matched_indices_cb = []
+
+# for j, cb_name in enumerate(cb_images):
+#     for i, sfm_img in enumerate(sfm_images):
+#         if os.path.basename(sfm_img.name) == os.path.basename(cb_name):
+#             matched_indices_sfm.append(i)
+#             matched_indices_cb.append(j)
+#             break
+
+# # Filter both datasets to only matched images
+# sfm_rotations = [sfm_rotations[i] for i in matched_indices_sfm]
+# sfm_translations = [sfm_translations[i] for i in matched_indices_sfm]
+# T_sat_to_cam_list = [T_sat_to_cam_list[j] for j in matched_indices_cb]
+
+# print(f"Matched {len(sfm_rotations)} SfM poses with checkerboard detections.")
+
+# # Debugging
+# print("SfM camera centers (m):")
+# for t in sfm_translations:
+#     print(t.flatten())
+
+# print("Checkerboard camera centers (m):")
+# for T in T_sat_to_cam_list:
+#     print(T[:3,3].flatten())
+
+
+# # ---------------------------------------------------------
+# # Compute and Apply Scale
+# # ---------------------------------------------------------
+# # sfm_t_array = np.hstack([t for t in sfm_translations])               # 3 x N
+# # cb_t_array  = np.hstack([T[:3, 3:] for T in T_sat_to_cam_list])      # 3 x N
+
+# # s = np.sum(cb_t_array * sfm_t_array) / np.sum(sfm_t_array**2)
+# # print(f"Estimated scale factor: {s:.4f}")
+
+# # sfm_translations_scaled = [s * t for t in sfm_translations]
+
+
+# sfm_t_array = np.hstack([t for t in sfm_translations])           # 3 x N
+# cb_t_array  = np.hstack([T[:3, 3:] for T in T_sat_to_cam_list])  # 3 x N
+
+# # Center around first camera to remove origin offset
+# sfm_t_array_centered = sfm_t_array - sfm_t_array[:, [0]]
+# cb_t_array_centered  = cb_t_array - cb_t_array[:, [0]]
+
+# # Compute scale factor using centered translations
+# s = np.sum(cb_t_array_centered * sfm_t_array_centered) / np.sum(sfm_t_array_centered**2)
+
+# # After computing R_align, t_align, and s
+# print(f"Estimated scale factor: {s}")
+
+# # --- Fix for negative scale or reflection ---
+# if s < 0:
+#     print("Negative scale detected — flipping coordinate system for consistency.")
+#     s = -s
+#     R_cb_to_sat[:, 2] *= -1  # Flip z-axis to correct handedness/reflection
+
+
+# sfm_translations_scaled = [s * t for t in sfm_translations]
+
+# # ---------------------------------------------------------
+# # 4. Compute differences between SfM and checkerboard-derived poses
+# # ---------------------------------------------------------
+# def rotation_error(R1, R2):
+#     """Return angular difference (deg) between two rotation matrices."""
+#     dR = R1.T @ R2
+#     angle = np.arccos(np.clip((np.trace(dR) - 1) / 2, -1.0, 1.0))
+#     return np.degrees(angle)
+
+# def translation_error(t1, t2):
+#     """Return Euclidean distance (m) between two translation vectors."""
+#     return np.linalg.norm(t1 - t2)
+
+# rotation_diffs = []
+# translation_diffs = []
+# num_images = len(T_sat_to_cam_list)  # matches SfM-used images
+
+# for i in range(num_images):
+#     R_sfm, t_sfm = sfm_rotations[i], sfm_translations_scaled[i]
+#     T_sat_cam_est = T_sat_to_cam_list[i]
+
+#     R_sat_cam = T_sat_cam_est[:3, :3]
+#     t_sat_cam = T_sat_cam_est[:3, 3:]
+
+#     rot_err = rotation_error(R_sfm, R_sat_cam)
+#     trans_err = translation_error(t_sfm, t_sat_cam)
+
+#     rotation_diffs.append(rot_err)
+#     translation_diffs.append(trans_err)
+
+# # ---------------------------------------------------------
+# # 5. Report validation results
+# # ---------------------------------------------------------
+# print("Pose validation results:")
+# for i, (r_err, t_err) in enumerate(zip(rotation_diffs, translation_diffs)):
+#     print(f"Image {i}: rotation error = {r_err:.3f}°, translation error = {t_err:.4f} m")
+
+# print(f"\nMean rotation error: {np.mean(rotation_diffs):.3f}°")
+# print(f"Mean translation error: {np.mean(translation_diffs):.4f} m")
+
+
+
+
+
+
+
+
+import os
 import numpy as np
 import open3d as o3d
-import os
+import pycolmap
+from scipy.spatial.transform import Rotation
 
-# Define transformation from checkerboard to satellite frame
-# R_cb_to_sat = o3d.geometry.get_rotation_matrix_from_xyz([0.1, 0.0, 0.0])
-# t_cb_to_sat = np.array([[0.05], [0.02], [0.01]])
+# -----------------------------
+# 1. Load scaled SfM point cloud
+# -----------------------------
+sparse_path = "sparse/0"
+pcd = o3d.io.read_point_cloud(os.path.join(sparse_path, "points.ply"))
+points = np.asarray(pcd.points)
+colors = np.asarray(pcd.colors)
 
+# -----------------------------
+# 2. Load SfM reconstruction
+# -----------------------------
+rec = pycolmap.Reconstruction(sparse_path)
+sfm_images = sorted(rec.images.values(), key=lambda x: x.name)
+sfm_cameras = {cam_id: cam for cam_id, cam in rec.cameras.items()}
+
+# Example: SfM rotations/translations
+sfm_rotations = [img.cam_from_world().rotation.matrix() for img in sfm_images]
+sfm_translations = [img.projection_center().flatten() for img in sfm_images]  # 3, 
+
+# -----------------------------
+# 3. Checkerboard camera poses
+# -----------------------------
+# T_cb_to_sat is your checkerboard → satellite transform
+# Example:
 R_cb_to_sat = np.array([
     [ 0.96917272, 0.0, 0.24638229],
     [ 0.0,        1.0, 0.0      ],
     [-0.24638229, 0.0, 0.96917272]
 ])
-t_cb_to_sat = np.array([[27.41], [0.0], [-35.25]])
-t_cb_to_sat = t_cb_to_sat / 1000.0  # if SolidWorks outputs mm
+t_cb_to_sat = np.array([27.41, 0.0, -35.25]) / 1000.0
 
-
-# Build homogeneous transform
 T_cb_to_sat = np.eye(4)
-T_cb_to_sat[:3, :3] = R_cb_to_sat
-T_cb_to_sat[:3, 3:] = t_cb_to_sat
+T_cb_to_sat[:3,:3] = R_cb_to_sat
+T_cb_to_sat[:3,3]  = t_cb_to_sat
 
-# Convert checkerboard poses to satellite frame
+# Suppose you have checker_rotations / checker_translations arrays
 T_sat_to_cam_list = []
 for R_cb, t_cb in zip(checker_rotations, checker_translations):
     T_cb_to_cam = np.eye(4)
-    T_cb_to_cam[:3, :3] = R_cb
-    T_cb_to_cam[:3, 3:] = t_cb
-    # satellite → cam = cb → cam × sat → cb⁻¹
+    T_cb_to_cam[:3,:3] = R_cb
+    T_cb_to_cam[:3,3]  = t_cb.flatten()
     T_sat_to_cam = T_cb_to_cam @ np.linalg.inv(T_cb_to_sat)
     T_sat_to_cam_list.append(T_sat_to_cam)
 
-# ---------------------------------------------------------
-# Align SfM and Checkerboard poses by image names
-# ---------------------------------------------------------
-rec_path = os.path.join(sfm_pipeline._sparse_path, "0")
-rec = pycolmap.Reconstruction(rec_path)
-sfm_images = list(rec.images.values())  # SfM images
-
-cb_images = cb._checker_image_names  # checkerboard-detected image filenames
-
+# -----------------------------
+# 4. Match images by name
+# -----------------------------
+cb_images = cb._checker_image_names
 matched_indices_sfm = []
 matched_indices_cb = []
 
@@ -150,96 +312,127 @@ for j, cb_name in enumerate(cb_images):
             matched_indices_cb.append(j)
             break
 
-# Filter both datasets to only matched images
-sfm_rotations = [sfm_rotations[i] for i in matched_indices_sfm]
-sfm_translations = [sfm_translations[i] for i in matched_indices_sfm]
-T_sat_to_cam_list = [T_sat_to_cam_list[j] for j in matched_indices_cb]
+sfm_rotations_matched = [sfm_rotations[i] for i in matched_indices_sfm]
+sfm_translations_matched = [sfm_translations[i] for i in matched_indices_sfm]
+T_sat_to_cam_list_matched = [T_sat_to_cam_list[j] for j in matched_indices_cb]
 
-print(f"Matched {len(sfm_rotations)} SfM poses with checkerboard detections.")
+# -----------------------------
+# 5. Compute scale & rotation alignment (Kabsch)
+# -----------------------------
+sfm_pts = np.stack(sfm_translations_matched, axis=1)  # 3 x N
+cb_pts  = np.stack([T[:3,3] for T in T_sat_to_cam_list_matched], axis=1)
 
-# Debugging
-print("SfM camera centers (m):")
-for t in sfm_translations:
-    print(t.flatten())
+# Center points
+sfm_mean = sfm_pts.mean(axis=1, keepdims=True)
+cb_mean  = cb_pts.mean(axis=1, keepdims=True)
+sfm_centered = sfm_pts - sfm_mean
+cb_centered  = cb_pts - cb_mean
 
-print("Checkerboard camera centers (m):")
-for T in T_sat_to_cam_list:
-    print(T[:3,3].flatten())
+# Scale
+s = np.sum(cb_centered * sfm_centered) / np.sum(sfm_centered**2)
+sfm_centered_scaled = s * sfm_centered
 
+# Rotation (Kabsch)
+H = sfm_centered_scaled @ cb_centered.T
+U, _, Vt = np.linalg.svd(H)
+R_align = Vt.T @ U.T
 
-# ---------------------------------------------------------
-# Compute and Apply Scale
-# ---------------------------------------------------------
-# sfm_t_array = np.hstack([t for t in sfm_translations])               # 3 x N
-# cb_t_array  = np.hstack([T[:3, 3:] for T in T_sat_to_cam_list])      # 3 x N
+# Handle reflection
+if np.linalg.det(R_align) < 0:
+    Vt[2,:] *= -1
+    R_align = Vt.T @ U.T
 
-# s = np.sum(cb_t_array * sfm_t_array) / np.sum(sfm_t_array**2)
-# print(f"Estimated scale factor: {s:.4f}")
+# Apply scale + rotation
+sfm_translations_aligned = [ (R_align @ (s*t.flatten())).flatten() for t in sfm_translations_matched ]
+sfm_rotations_aligned = [ R_align @ R for R in sfm_rotations_matched ]
 
-# sfm_translations_scaled = [s * t for t in sfm_translations]
-
-
-sfm_t_array = np.hstack([t for t in sfm_translations])           # 3 x N
-cb_t_array  = np.hstack([T[:3, 3:] for T in T_sat_to_cam_list])  # 3 x N
-
-# Center around first camera to remove origin offset
-sfm_t_array_centered = sfm_t_array - sfm_t_array[:, [0]]
-cb_t_array_centered  = cb_t_array - cb_t_array[:, [0]]
-
-# Compute scale factor using centered translations
-s = np.sum(cb_t_array_centered * sfm_t_array_centered) / np.sum(sfm_t_array_centered**2)
-
-# After computing R_align, t_align, and s
-print(f"Estimated scale factor: {s}")
-
-# --- Fix for negative scale or reflection ---
-if s < 0:
-    print("Negative scale detected — flipping coordinate system for consistency.")
-    s = -s
-    R_cb_to_sat[:, 2] *= -1  # Flip z-axis to correct handedness/reflection
-
-
-sfm_translations_scaled = [s * t for t in sfm_translations]
-
-# ---------------------------------------------------------
-# 4. Compute differences between SfM and checkerboard-derived poses
-# ---------------------------------------------------------
-def rotation_error(R1, R2):
-    """Return angular difference (deg) between two rotation matrices."""
+# -----------------------------
+# 6. Compute rotation/translation errors
+# -----------------------------
+def rotation_error(R1,R2):
     dR = R1.T @ R2
-    angle = np.arccos(np.clip((np.trace(dR) - 1) / 2, -1.0, 1.0))
+    angle = np.arccos(np.clip((np.trace(dR)-1)/2,-1,1))
     return np.degrees(angle)
 
-def translation_error(t1, t2):
-    """Return Euclidean distance (m) between two translation vectors."""
-    return np.linalg.norm(t1 - t2)
+def translation_error(t1,t2):
+    return np.linalg.norm(t1-t2)
 
-rotation_diffs = []
-translation_diffs = []
-num_images = len(T_sat_to_cam_list)  # matches SfM-used images
+rotation_diffs=[]
+translation_diffs=[]
+for i in range(len(T_sat_to_cam_list_matched)):
+    R_cb = T_sat_to_cam_list_matched[i][:3,:3]
+    t_cb = T_sat_to_cam_list_matched[i][:3,3]
+    rotation_diffs.append(rotation_error(sfm_rotations_aligned[i], R_cb))
+    translation_diffs.append(translation_error(sfm_translations_aligned[i], t_cb))
 
-for i in range(num_images):
-    R_sfm, t_sfm = sfm_rotations[i], sfm_translations_scaled[i]
-    T_sat_cam_est = T_sat_to_cam_list[i]
-
-    R_sat_cam = T_sat_cam_est[:3, :3]
-    t_sat_cam = T_sat_cam_est[:3, 3:]
-
-    rot_err = rotation_error(R_sfm, R_sat_cam)
-    trans_err = translation_error(t_sfm, t_sat_cam)
-
-    rotation_diffs.append(rot_err)
-    translation_diffs.append(trans_err)
-
-# ---------------------------------------------------------
-# 5. Report validation results
-# ---------------------------------------------------------
-print("Pose validation results:")
-for i, (r_err, t_err) in enumerate(zip(rotation_diffs, translation_diffs)):
-    print(f"Image {i}: rotation error = {r_err:.3f}°, translation error = {t_err:.4f} m")
-
-print(f"\nMean rotation error: {np.mean(rotation_diffs):.3f}°")
+print(f"Mean rotation error: {np.mean(rotation_diffs):.3f}°")
 print(f"Mean translation error: {np.mean(translation_diffs):.4f} m")
+
+# -----------------------------
+# 7. Visualization
+# -----------------------------
+def make_camera_frustum(R, t, scale=0.05, color=[1,0,0]):
+    corners = np.array([
+        [0,0,0],
+        [-0.5,-0.5,1.0],
+        [0.5,-0.5,1.0],
+        [0.5,0.5,1.0],
+        [-0.5,0.5,1.0]
+    ]) * scale
+    corners_world = (R @ corners.T).T + t
+    lines = [[0,1],[0,2],[0,3],[0,4],[1,2],[2,3],[3,4],[4,1]]
+    line_set = o3d.geometry.LineSet()
+    line_set.points = o3d.utility.Vector3dVector(corners_world)
+    line_set.lines = o3d.utility.Vector2iVector(lines)
+    line_set.colors = o3d.utility.Vector3dVector([color]*len(lines))
+    return line_set
+
+# Point cloud scaled
+pcd_scaled = o3d.geometry.PointCloud()
+pcd_scaled.points = o3d.utility.Vector3dVector(points * s)
+pcd_scaled.colors = o3d.utility.Vector3dVector(colors)
+
+# SfM cameras
+geometries_sfm = [pcd_scaled]
+for R,t in zip(sfm_rotations_aligned,sfm_translations_aligned):
+    geometries_sfm.append(make_camera_frustum(R,t,color=[1,0,0]))
+
+o3d.visualization.draw_geometries(geometries_sfm, window_name="SfM Aligned (Red)")
+
+# Checkerboard cameras
+geometries_cb = [pcd_scaled]
+for T in T_sat_to_cam_list_matched:
+    geometries_cb.append(make_camera_frustum(T[:3,:3], T[:3,3], color=[0,1,0]))
+
+o3d.visualization.draw_geometries(geometries_cb, window_name="Checkerboard Cameras (Green)")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -264,6 +457,21 @@ print(f"Mean translation error: {np.mean(translation_diffs):.4f} m")
 # )
 
 plot_pointcloud("sparse", store_path="0", camera_scale=0.1, matched_indices=matched_indices_sfm)
+
+
+
+
+
+
+
+pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
+points = np.asarray(pcd.points) * s
+pcd_scaled = o3d.geometry.PointCloud()
+pcd_scaled.points = o3d.utility.Vector3dVector(points)
+pcd_scaled.colors = o3d.utility.Vector3dVector(np.asarray(pcd.colors))
+
+plot_pointcloud_checkerboard(pcd_scaled, T_sat_to_cam_list, frustum_scale=0.05)
+
 
 
 

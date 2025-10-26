@@ -75,6 +75,102 @@ def plot_pointcloud(sparse_path, store_path="0", camera_scale=0.1, matched_indic
 
 
 
+def plot_pointcloud_checkerboard(point_cloud, T_sat_to_cam_list, frustum_scale=0.05):
+    """
+    Visualize a point cloud with camera frustums from checkerboard-derived poses.
+
+    Args:
+        point_cloud (o3d.geometry.PointCloud): The point cloud to visualize.
+        T_sat_to_cam_list (list of 4x4 np.array): List of checkerboard-to-satellite camera transforms.
+        frustum_scale (float): Visual scale for camera frustums (smaller is better for compact visualization).
+    """
+    import open3d as o3d
+    import numpy as np
+
+    geometries = [point_cloud]
+
+    for T in T_sat_to_cam_list:
+        R = T[:3, :3]
+        t = T[:3, 3].flatten()
+
+        # --- Camera frustum (smaller, no axes) ---
+        corners_cam = np.array([
+            [0, 0, 0],       # camera center
+            [-0.5, -0.5, 1.0],
+            [0.5, -0.5, 1.0],
+            [0.5, 0.5, 1.0],
+            [-0.5, 0.5, 1.0],
+        ]) * frustum_scale * 2
+
+        corners_world = (R @ corners_cam.T).T + t
+
+        lines = [[0,1],[0,2],[0,3],[0,4],[1,2],[2,3],[3,4],[4,1]]
+        colors = [[0, 1, 0] for _ in lines]  # Green for checkerboard
+
+        line_set = o3d.geometry.LineSet()
+        line_set.points = o3d.utility.Vector3dVector(corners_world)
+        line_set.lines = o3d.utility.Vector2iVector(lines)
+        line_set.colors = o3d.utility.Vector3dVector(colors)
+        geometries.append(line_set)
+
+    print(f"Visualizing {len(T_sat_to_cam_list)} checkerboard cameras and {len(point_cloud.points)} points")
+    o3d.visualization.draw_geometries(geometries)
+
+
+
+# def plot_pointcloud_checkerboard(point_cloud, T_sat_to_cam_list, camera_scale=0.1):
+#     """
+#     Visualize a point cloud with camera frustums from checkerboard-derived poses.
+
+#     Args:
+#         point_cloud (o3d.geometry.PointCloud): The point cloud to visualize.
+#         T_sat_to_cam_list (list of 4x4 np.array): List of checkerboard-to-satellite camera transforms.
+#         camera_scale (float): Visual scale for axes and frustums.
+#     """
+#     import open3d as o3d
+#     import numpy as np
+
+#     geometries = [point_cloud]
+
+#     for T in T_sat_to_cam_list:
+#         R = T[:3, :3]
+#         t = T[:3, 3].flatten()
+
+#         # --- Coordinate frame ---
+#         camera_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=camera_scale)
+#         T_frame = np.eye(4)
+#         T_frame[:3, :3] = R
+#         T_frame[:3, 3] = t
+#         camera_frame.transform(T_frame)
+#         geometries.append(camera_frame)
+
+#         # --- Camera frustum (small) ---
+#         corners_cam = np.array([
+#             [0, 0, 0],
+#             [-0.5, -0.5, 1.0],
+#             [0.5, -0.5, 1.0],
+#             [0.5, 0.5, 1.0],
+#             [-0.5, 0.5, 1.0],
+#         ]) * camera_scale * 2
+#         corners_world = (R @ corners_cam.T).T + t
+
+#         lines = [[0,1],[0,2],[0,3],[0,4],[1,2],[2,3],[3,4],[4,1]]
+#         colors = [[0, 1, 0] for _ in lines]  # Green for checkerboard
+
+#         line_set = o3d.geometry.LineSet()
+#         line_set.points = o3d.utility.Vector3dVector(corners_world)
+#         line_set.lines = o3d.utility.Vector2iVector(lines)
+#         line_set.colors = o3d.utility.Vector3dVector(colors)
+#         geometries.append(line_set)
+
+#     print(f"Visualizing {len(T_sat_to_cam_list)} checkerboard cameras and {len(point_cloud.points)} points")
+#     o3d.visualization.draw_geometries(geometries)
+
+
+
+
+
+
 # def plot_pointcloud(
 #     sparse_path,
 #     store_path="0",
