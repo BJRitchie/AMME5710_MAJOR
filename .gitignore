@@ -10,6 +10,7 @@ database.db
 data 
 images/
 *__pycache__/
+*.pkl
 
 # # Exceptions
 # !src/

@@ -7,11 +7,8 @@ from file_reading_lib import gen_images_from_vid
 import checkerboard_lib as checkerboard
 
 # # Convert the video into images 
-# # vid_path = "images/batmo.mp4"
-# # vid_path = 'images/ben.mp4'
-# # store_path="images/ben"
-# vid_path = 'images/hanging_sat_checkerboard.mp4'
-# store_path="images/hanging_sat_checkerboard"
+# vid_path = 'images/small_checker_spin.mp4'
+# store_path="images/small_checker_spin"
 # gen_images_from_vid( vid_path, store_path ) 
 
 # # Storage files 
@@ -43,15 +40,17 @@ import checkerboard_lib as checkerboard
 # sfm_pipeline.plot_pointcloud() 
 
 
+# sfm_save_path = "images/small_checker_spin_sfm"
+
 # # Save only the images that SfM used
-# sfm_pipeline.save_registered_images(output_folder="images/hanging_sat_checkerboard_sfm")
+# sfm_pipeline.save_registered_images(output_folder=sfm_save_path)
 
 
 
-# Checkerboard detection on images the SFM used 
+# # Checkerboard detection on images the SFM used 
 # cb = checkerboard.Checkerboard() 
-# cb.read_ims("images/hanging_sat_checkerboard_sfm") 
-# cb.undistort_ims(grid_size=(3, 3), cell_size=0.096)
+# cb.read_ims(sfm_save_path) 
+# cb.undistort_ims(grid_size=(3, 3), cell_size=0.002)
 # cb.plot_checkerboards() 
 
 # plt.show()
@@ -60,9 +59,9 @@ import checkerboard_lib as checkerboard
 # SAVE/LOAD
 import pickle
 
-# ---------------------------------------------------------
-# 8. Save pipeline state for future reuse
-# ---------------------------------------------------------
+# # ---------------------------------------------------------
+# # 8. Save pipeline state for future reuse
+# # ---------------------------------------------------------
 # with open("sfm_pipeline.pkl", "wb") as f:
 #     pickle.dump(sfm_pipeline, f)
 # print("Saved SfM pipeline to 'sfm_pipeline.pkl'")
@@ -103,8 +102,17 @@ import open3d as o3d
 import os
 
 # Define transformation from checkerboard to satellite frame
-R_cb_to_sat = o3d.geometry.get_rotation_matrix_from_xyz([0.1, 0.0, 0.0])
-t_cb_to_sat = np.array([[0.05], [0.02], [0.01]])
+# R_cb_to_sat = o3d.geometry.get_rotation_matrix_from_xyz([0.1, 0.0, 0.0])
+# t_cb_to_sat = np.array([[0.05], [0.02], [0.01]])
+
+R_cb_to_sat = np.array([
+    [ 0.96917272, 0.0, 0.24638229],
+    [ 0.0,        1.0, 0.0      ],
+    [-0.24638229, 0.0, 0.96917272]
+])
+t_cb_to_sat = np.array([[27.41], [0.0], [-35.25]])
+t_cb_to_sat = t_cb_to_sat / 1000.0  # if SolidWorks outputs mm
+
 
 # Build homogeneous transform
 T_cb_to_sat = np.eye(4)
@@ -146,6 +154,16 @@ sfm_translations = [sfm_translations[i] for i in matched_indices_sfm]
 T_sat_to_cam_list = [T_sat_to_cam_list[j] for j in matched_indices_cb]
 
 print(f"Matched {len(sfm_rotations)} SfM poses with checkerboard detections.")
+
+# Debugging
+print("SfM camera centers (m):")
+for t in sfm_translations:
+    print(t.flatten())
+
+print("Checkerboard camera centers (m):")
+for T in T_sat_to_cam_list:
+    print(T[:3,3].flatten())
+
 
 # ---------------------------------------------------------
 # Compute and Apply Scale
@@ -247,28 +265,28 @@ rec = pycolmap.Reconstruction("sparse/0")
 sfm_images = sorted(rec.images.values(), key=lambda x: x.name)
 sfm_cameras = {cam_id: cam for cam_id, cam in rec.cameras.items()}
 
-# ---------------------------------------------------------
-# Add SfM camera frustums (scaled translations)
-# ---------------------------------------------------------
-for img in sfm_images:
+
+for i in range(len(sfm_translations_scaled)):
+    img = sfm_images[matched_indices_sfm[i]]  # get the corresponding SfM image
+    t = sfm_translations_scaled[i].flatten()  # already matched & scaled
+    T_cb = T_sat_to_cam_list[i]
+
     R = img.cam_from_world().rotation.matrix()
-    t = img.projection_center().flatten() * s  # apply scale
+
     cam = sfm_cameras[img.camera_id]
     fx = cam.params[0] if len(cam.params) > 0 else 1
     fy = cam.params[1] if len(cam.params) > 1 else fx
     width, height = cam.width, cam.height
 
-    ls = make_camera_frustum(R, t, width, height, fx, fy, color=[1,0,0])
-    geometries.append(ls)
+    ls_sfm = make_camera_frustum(R, t, width, height, fx, fy, color=[1,0,0])
+    geometries.append(ls_sfm)
 
-# ---------------------------------------------------------
-# Add checkerboard camera frustums
-# ---------------------------------------------------------
-for T in T_sat_to_cam_list:
-    R_cb = T[:3,:3]
-    t_cb = T[:3,3]
-    ls = make_camera_frustum(R_cb, t_cb, color=[0,1,0])
-    geometries.append(ls)
+    # Checkerboard camera
+    T_cb = T_sat_to_cam_list[i]
+    R_cb = T_cb[:3,:3]
+    t_cb = T_cb[:3,3]
+    ls_cb = make_camera_frustum(R_cb, t_cb, color=[0,1,0])
+    geometries.append(ls_cb)
 
 # ---------------------------------------------------------
 # Visualize everything
@@ -277,6 +295,39 @@ o3d.visualization.draw_geometries(
     geometries,
     window_name="Scaled Point Cloud + Camera Poses (SfM=Red, Checkerboard=Green)"
 )
+
+
+
+# ---------------------------------------------------------
+# Add SfM camera frustums (scaled translations)
+# ---------------------------------------------------------
+# for img in sfm_images:
+#     R = img.cam_from_world().rotation.matrix()
+#     t = img.projection_center().flatten() * s  # apply scale
+#     cam = sfm_cameras[img.camera_id]
+#     fx = cam.params[0] if len(cam.params) > 0 else 1
+#     fy = cam.params[1] if len(cam.params) > 1 else fx
+#     width, height = cam.width, cam.height
+
+#     ls = make_camera_frustum(R, t, width, height, fx, fy, color=[1,0,0])
+#     geometries.append(ls)
+
+# # ---------------------------------------------------------
+# # Add checkerboard camera frustums
+# # ---------------------------------------------------------
+# for T in T_sat_to_cam_list:
+#     R_cb = T[:3,:3]
+#     t_cb = T[:3,3]
+#     ls = make_camera_frustum(R_cb, t_cb, color=[0,1,0])
+#     geometries.append(ls)
+
+# # ---------------------------------------------------------
+# # Visualize everything
+# # ---------------------------------------------------------
+# o3d.visualization.draw_geometries(
+#     geometries,
+#     window_name="Scaled Point Cloud + Camera Poses (SfM=Red, Checkerboard=Green)"
+# )
 
 
 
