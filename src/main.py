@@ -17,6 +17,7 @@ im_path = store_path
 db_path = "database.db"
 sparse_path = "sparse"
 dense_path = "dense"
+sat_model_path = "sat_model"
 
 # Settings 
 sift_ops = pycolmap.SiftExtractionOptions()
@@ -26,7 +27,7 @@ sift_ops.num_octaves = 4
 
 # Initialise the pipeline 
 sfm_pipeline = pipeline.StrcFromMotion ( 
-    db_path, im_path, sparse_path, dense_path,
+    db_path, im_path, sparse_path, dense_path, sat_model_path,
     cam_mode    =pycolmap.CameraMode.AUTO, 
     cam_model   ="SIMPLE_RADIAL",  
     reader_ops  =pycolmap.ImageReaderOptions(), 
@@ -34,9 +35,21 @@ sfm_pipeline = pipeline.StrcFromMotion (
     device      =pycolmap.Device.cpu 
 ) 
 
-sfm_pipeline.resize_ims( store_path, 1200, 10 )
-sfm_pipeline.prep_pointcloud() 
-sfm_pipeline.make_pointcloud()
-sfm_pipeline.clean_pointcloud() 
-sfm_pipeline.plot_pointcloud() 
+# sfm_pipeline.make_reference_ply()
+# sfm_pipeline.plot_reference_model()
+
+# sfm_pipeline.resize_ims( store_path, 1200, 10 )
+# sfm_pipeline.prep_pointcloud() 
+# sfm_pipeline.make_pointcloud()
+# sfm_pipeline.clean_pointcloud() 
+# sfm_pipeline.plot_pointcloud()
+
+# Surface matching using PPF + ICP (run after point cloud generation)
+# First, let's diagnose what went wrong with the previous attempt
+print("=== DIAGNOSING PREVIOUS ALIGNMENT FAILURE ===")
+sfm_pipeline.diagnose_alignment_failure(store_path="sat_model")
+
+print("\n=== RUNNING IMPROVED SURFACE MATCHING ===")
+# Run the improved surface matching with correct path
+sfm_pipeline.surface_matching_ppf_icp(store_path="sat_model", voxel_size=0.05)
 
