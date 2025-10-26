@@ -10,7 +10,8 @@ class Checkerboard:
     def __init__(self):
         
         self._ims = [] 
-        self.detected_indices = [] 
+        self._image_names = []
+        self._checker_image_names = [] # Store filenames with detected checkerboard
         
         pass 
     
@@ -33,6 +34,7 @@ class Checkerboard:
                 
             if img is not None:  # Ensure it read correctly
                 self._ims.append(img) 
+                self._image_names.append(file)
         
         return  
     
@@ -87,7 +89,7 @@ class Checkerboard:
             corners2 = cv2.cornerSubPix(im, corners, window_size, (-1,-1), criteria)
             checker_board_coords.append(corners2) 
 
-            self.detected_indices.append(i)
+            self._checker_image_names.append(self._image_names[i])  # <-- store filename for detected image
 
             # Build numpy array containing (x,y,z) coordinates of corners, relative to board itself
             pattern_points = np.zeros((np.prod(grid_size), 3), np.float32)
@@ -95,7 +97,7 @@ class Checkerboard:
             pattern_points = cell_size * pattern_points
             corr_3d_points.append(pattern_points)
 
-        print(f"Detected checkerboard in {len(self.detected_indices)} images out of {len(self._ims)}")
+        print(f"Detected checkerboard in {len(self._checker_image_names)} images out of {len(self._ims)}")
 
         # Calibrate the camera 
         output = cv2.calibrateCameraExtended(
@@ -201,8 +203,8 @@ class Checkerboard:
         
         return rotations, translations
     
-    def get_num_detected(self):
-        return len(self.detected_indices)
+    # def get_num_detected(self):
+    #     return len(self.detected_indices)
 
 
 

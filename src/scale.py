@@ -239,7 +239,7 @@ if __name__ == "__main__":
     ax.scatter(points[:,0], points[:,1], points[:,2], c=colors, s=1)
 
     # # Draw axes lines (1 cm = 0.01 m)
-    axis_length = 0.01
+    # axis_length = 0.01
     # ax.quiver(0, 0, 0, axis_length, 0, 0, color='r', linewidth=2, arrow_length_ratio=0.1)
     # ax.quiver(0, 0, 0, 0, axis_length, 0, color='g', linewidth=2, arrow_length_ratio=0.1)
     # ax.quiver(0, 0, 0, 0, 0, axis_length, color='b', linewidth=2, arrow_length_ratio=0.1)

@@ -250,6 +250,8 @@ class StrcFromMotion:
         
         return    
     
+
+    # TODO delete
     def plot_keypoints(self): 
         
         first_image_path = os.path.join(self._image_path, self._image_names[0])
@@ -296,21 +298,25 @@ class StrcFromMotion:
 
     def save_registered_images(self, store_path="0", output_folder="registered_images"):
         """
-        Copy only the images that were used in the SfM reconstruction
+        Clear folder then copy only the images that were used in the SfM reconstruction
         to a new folder for downstream processing (e.g., checkerboard detection).
         """
         rec_path = os.path.join(self._sparse_path, store_path)
         rec = pycolmap.Reconstruction(rec_path)
 
-        os.makedirs(output_folder, exist_ok=True)
+        # Clear existing folder if it exists
+        if os.path.exists(output_folder):
+            shutil.rmtree(output_folder)
+        os.makedirs(output_folder)
 
+        # Copy registered images
         for image_id, image in rec.images.items():
             src_path = os.path.join(self._image_path, image.name)
             dst_path = os.path.join(output_folder, image.name)
             if os.path.exists(src_path):
                 shutil.copy(src_path, dst_path)
 
-        print(f"Saved {len(rec.images)} registered images to '{output_folder}'.")
+        print(f"Saved {len(rec.images)} registered images to '{output_folder}' (folder cleared before copying).")
 
 
 
