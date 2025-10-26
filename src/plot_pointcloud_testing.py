@@ -184,6 +184,67 @@ def plot_pointcloud_orig(sparse_path, store_path="0", camera_scale=0.1):
 
 
 
+def plot_pointcloud_scaled(sparse_path, sfm_rotations, sfm_translations_scaled, store_path="0", camera_scale=0.1):
+    """
+    Visualize a COLMAP sparse reconstruction with scaled SfM camera translations.
+
+    Args:
+        sparse_path (str): Path to the parent sparse directory (e.g., "path/to/sparse").
+        sfm_rotations (list of 3x3 np.ndarray): Rotation matrices from SfM.
+        sfm_translations_scaled (list of 3x1 np.ndarray): Translations already scaled.
+        store_path (str): Subfolder name (e.g., "0") containing points.ply.
+        camera_scale (float): Scale factor for visualizing camera coordinate frames and frustums.
+    """
+    import os
+    import open3d as o3d
+    import numpy as np
+
+    print("=== Loading and visualizing sparse point cloud with scaled SfM cameras ===")
+
+    # Load point cloud
+    store_name = os.path.join(sparse_path, store_path)
+    file_path = os.path.join(store_name, "points.ply")
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"points.ply not found at {file_path}")
+    pcd = o3d.io.read_point_cloud(file_path)
+    geometries = [pcd]
+
+    for R, t in zip(sfm_rotations, sfm_translations_scaled):
+        t = t.flatten()
+        # Coordinate frame
+        camera_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=camera_scale)
+        camera_frame.rotate(R, center=(0, 0, 0))
+        camera_frame.translate(t)
+        geometries.append(camera_frame)
+
+        # Frustum (dummy intrinsics)
+        frustum_depth = camera_scale * 2
+        width, height = 640, 480
+        fx = fy = 500.0
+        cx, cy = width / 2, height / 2
+
+        corners_cam = np.array([
+            [0, 0, 0],
+            [(0 - cx) * frustum_depth / fx, (0 - cy) * frustum_depth / fy, frustum_depth],
+            [(width - cx) * frustum_depth / fx, (0 - cy) * frustum_depth / fy, frustum_depth],
+            [(width - cx) * frustum_depth / fx, (height - cy) * frustum_depth / fy, frustum_depth],
+            [(0 - cx) * frustum_depth / fx, (height - cy) * frustum_depth / fy, frustum_depth]
+        ])
+        corners_world = (R @ corners_cam.T).T + t
+        lines = [[0,1],[0,2],[0,3],[0,4],[1,2],[2,3],[3,4],[4,1]]
+        colors = [[1,0,0] for _ in lines]
+
+        line_set = o3d.geometry.LineSet()
+        line_set.points = o3d.utility.Vector3dVector(corners_world)
+        line_set.lines = o3d.utility.Vector2iVector(lines)
+        line_set.colors = o3d.utility.Vector3dVector(colors)
+        geometries.append(line_set)
+
+    print(f"Visualizing {len(sfm_translations_scaled)} scaled SfM cameras and {len(pcd.points)} points")
+    o3d.visualization.draw_geometries(geometries)
+
+
+
 
 import open3d as o3d
 import numpy as np
@@ -379,6 +440,28 @@ def plot_sfm_vs_checkerboard(sparse_path,
 
     print(f"Visualizing {len(sfm_translations_scaled)} SfM cameras and {len(T_sat_to_cam_list)} checkerboard cameras")
     o3d.visualization.draw_geometries(geometries, window_name="SfM vs Checkerboard Camera Poses")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

@@ -6,7 +6,7 @@ import sfm_pipeline_lib as pipeline
 from file_reading_lib import gen_images_from_vid 
 import checkerboard_lib as checkerboard
 
-from plot_pointcloud_testing import plot_pointcloud_orig, plot_pointcloud_matched, plot_checkerboard_camera_poses, plot_sfm_vs_checkerboard
+from plot_pointcloud_testing import plot_pointcloud_orig, plot_pointcloud_matched, plot_checkerboard_camera_poses, plot_sfm_vs_checkerboard, plot_pointcloud_scaled
 
 # # Convert the video into images 
 # vid_path = 'images/small_checker_spin.mp4'
@@ -262,6 +262,9 @@ print(f"Mean translation error after scaling: {np.mean(translation_diffs_scaled)
 
 plot_checkerboard_camera_poses("sparse/0", T_sat_to_cam_list, camera_scale=0.05)
 
+sfm_rotations_all, sfm_translations_all = sfm_pipeline.get_poses()
+sfm_translations_all = [scale * t for t in sfm_translations_all]
+plot_pointcloud_scaled("sparse", sfm_rotations_all, sfm_translations_all, store_path="0", camera_scale=0.1)
 
 # No scaling to sfm translations
 # plot_sfm_vs_checkerboard(sparse_path, 
@@ -282,6 +285,8 @@ plot_sfm_vs_checkerboard(sparse_path,
                              T_cb_to_sat, 
                              matched_indices_cb=None, 
                              camera_scale=0.1)
+
+
 
 
 import sys
