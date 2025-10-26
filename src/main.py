@@ -160,12 +160,20 @@ import numpy as np
 # 1. Transform checkerboard poses to satellite frame
 # ------------------------------
 # Define checkerboard → satellite transform
+# R_cb_to_sat = np.array([
+#     [ 0.96917272, 0.0, 0.24638229],
+#     [ 0.0,        1.0, 0.0      ],
+#     [-0.24638229, 0.0, 0.96917272]
+# ])
 R_cb_to_sat = np.array([
-    [ 0.96917272, 0.0, 0.24638229],
+    [ 0.96917272, 0.0, -0.24638229],
     [ 0.0,        1.0, 0.0      ],
-    [-0.24638229, 0.0, 0.96917272]
+    [0.24638229, 0.0, 0.96917272]
 ])
-t_cb_to_sat = np.array([[27.41], [0.0], [-35.25]]) / 1000.0  # mm → m
+# t_cb_to_sat = np.array([[27.41], [0.0], [-35.25]]) / 1000.0  # mm → m
+
+t_cb_to_sat = np.array([[6.9388939e-18], [0.0], [0.0]]) #  / 1000.0  # mm → m
+
 
 T_cb_to_sat = np.eye(4)
 T_cb_to_sat[:3, :3] = R_cb_to_sat
@@ -238,6 +246,9 @@ cb_t_centered  = cb_t_array - cb_t_array[:, [0]]
 # Compute scale factor
 scale = np.sum(cb_t_centered * sfm_t_centered) / np.sum(sfm_t_centered**2)
 print(f"Estimated scale factor: {scale:.6f}")
+
+if scale < 0:
+    scale *= -1
 
 # Apply scale to all SfM translations
 sfm_translations_scaled = [scale * t for t in sfm_translations]
