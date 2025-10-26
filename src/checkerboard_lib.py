@@ -203,8 +203,6 @@ class Checkerboard:
         
         return rotations, translations
     
-    # def get_num_detected(self):
-    #     return len(self.detected_indices)
 
 
 
