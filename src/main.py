@@ -114,8 +114,6 @@ matched_indices_cb = []
 for j, cb_name in enumerate(cb_images):
     for i, sfm_img in enumerate(sfm_images):
         if os.path.basename(sfm_img.name) == os.path.basename(cb_name):
-            # if (os.path.basename(sfm_img.name) == "frame78.jpg"):
-            #     continue
             print(os.path.basename(sfm_img.name))
             matched_indices_sfm.append(i)
             matched_indices_cb.append(j)
@@ -139,6 +137,318 @@ plot_pointcloud_matched("sparse", store_path="0", camera_scale=0.1, matched_indi
 
 
 
+
+
+
+import matplotlib.pyplot as plt
+import numpy as np
+import cv2
+
+# -----------------------------
+# 1. Gather checkerboard points and camera positions
+# -----------------------------
+
+# Get 3D points of all checkerboards
+checker_points = []
+for rvec, tvec in zip(cb._rvecs, cb._tvecs):
+    R_board, _ = cv2.Rodrigues(rvec)
+    t_board = np.asarray(tvec).reshape(3)
+    objp = np.zeros((np.prod(cb._grid_size), 3), np.float32)
+    objp[:, :2] = np.indices(cb._grid_size).T.reshape(-1, 2)
+    objp *= cb._cell_size
+    points_world = (R_board @ objp.T + t_board.reshape(3, 1)).T
+    checker_points.append(points_world)
+
+checker_points = np.vstack(checker_points)
+
+# Get camera positions
+camera_rotations, camera_positions = cb.get_camera_poses()
+camera_positions = np.hstack(camera_positions).T  # shape (N, 3)
+
+# -----------------------------
+# 2. Plot point cloud + checkerboards + cameras
+# -----------------------------
+
+fig = plt.figure(figsize=(10,10))
+ax = fig.add_subplot(111, projection='3d')
+
+# # Plot SfM scaled points if available
+# if 'points_scaled' in globals():
+#     ax.scatter(points_scaled[:,0], points_scaled[:,1], points_scaled[:,2],
+#                c='gray', s=1, label='SfM points')
+
+# Plot checkerboard points
+ax.scatter(checker_points[:,0], checker_points[:,1], checker_points[:,2],
+           c='blue', s=10, label='Checkerboard corners')
+
+# Plot camera positions
+ax.scatter(camera_positions[:,0], camera_positions[:,1], camera_positions[:,2],
+           c='red', s=50, marker='^', label='Checkerboard cameras')
+
+# Optional: draw camera axes
+axis_length = cb._cell_size * max(cb._grid_size) * 0.5
+for R_cam, C_cam in zip(camera_rotations, camera_positions):
+    origin = C_cam
+    x_axis = origin + axis_length * R_cam[:,0]
+    y_axis = origin + axis_length * R_cam[:,1]
+    z_axis = origin + axis_length * R_cam[:,2]
+    ax.plot([origin[0], x_axis[0]], [origin[1], x_axis[1]], [origin[2], x_axis[2]], c='r')
+    ax.plot([origin[0], y_axis[0]], [origin[1], y_axis[1]], [origin[2], y_axis[2]], c='g')
+    ax.plot([origin[0], z_axis[0]], [origin[1], z_axis[1]], [origin[2], z_axis[2]], c='b')
+
+# -----------------------------
+# 3. Final plot settings
+# -----------------------------
+
+ax.set_box_aspect([1,1,1])
+ax.set_xlabel("X (m)")
+ax.set_ylabel("Y (m)")
+ax.set_zlabel("Z (m)")
+plt.title("Checkerboards and Camera Poses in 3D")
+ax.legend()
+plt.show()
+
+
+
+
+
+
+
+
+import itertools
+import numpy as np
+
+# Matched SfM and checkerboard camera translations
+sfm_translations_matched = [sfm_translations[i].reshape(3) for i in matched_indices_sfm]
+checker_positions = np.hstack(cb.get_camera_poses()[1]).T  # shape (N,3) in meters
+
+# Compute scale factor for each pair of cameras
+scale_factors = []
+for (i, j) in itertools.combinations(range(len(sfm_translations_matched)), 2):
+    # Distance in Colmap units
+    d_sfm = np.linalg.norm(sfm_translations_matched[j] - sfm_translations_matched[i])
+    # Distance in meters from checkerboard
+    d_m = np.linalg.norm(checker_positions[j] - checker_positions[i])
+    scale_factors.append(d_m / d_sfm)
+
+# Use the average scale factor
+scale_factor = np.mean(scale_factors)
+print(f"Robust scale factor from all camera pairs: {scale_factor:.4f} meters/unit")
+
+
+
+# ---------------------------------------------------------
+# Matplotlib plot to show scaled point cloud only
+# ---------------------------------------------------------
+print("Load and scale point cloud")
+pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
+points = np.asarray(pcd.points)
+colors = np.asarray(pcd.colors)
+
+# Apply scale factor
+points_scaled = points * scale_factor
+
+# Create a new point cloud object with scaled points
+pcd_scaled = o3d.geometry.PointCloud()
+pcd_scaled.points = o3d.utility.Vector3dVector(points_scaled)
+pcd_scaled.colors = o3d.utility.Vector3dVector(colors)  # preserve original colors
+
+# Save the scaled point cloud
+o3d.io.write_point_cloud("sparse/0/points_scaled.ply", pcd_scaled)
+print("Scaled point cloud saved to 'sparse/0/points_scaled.ply'")
+
+fig = plt.figure(figsize=(7,7))
+ax = fig.add_subplot(111, projection='3d')
+
+ax.scatter(points_scaled[:,0], points_scaled[:,1], points_scaled[:,2], c=colors, s=1)
+
+ax.set_box_aspect([1,1,1])
+ax.set_xlabel("X (m)")
+ax.set_ylabel("Y (m)")
+ax.set_zlabel("Z (m)")
+plt.title("Scaled Point Cloud (Metric Scale Applied)")
+plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+import numpy as np
+from scipy.spatial.transform import Rotation as R
+
+# ----------------------------------
+# 1. Get matched camera positions
+# ----------------------------------
+# checkerboard camera positions in meters
+_, cb_cams = cb.get_camera_poses()
+cb_cams = np.hstack(cb_cams).T  # shape (N, 3)
+
+# SfM camera positions
+sfm_cams = np.array([sfm_translations[i].reshape(3) for i in matched_indices_sfm])  # (N,3)
+
+# Apply scale factor to SfM cameras
+sfm_cams_scaled = sfm_cams * scale_factor
+
+# ----------------------------------
+# 2. Compute rigid transform using Kabsch algorithm
+# ----------------------------------
+def compute_rigid_transform(A, B):
+    """
+    Computes rotation R and translation t to align A -> B (A and B are Nx3)
+    Returns R (3x3) and t (3,)
+    """
+    assert A.shape == B.shape
+    centroid_A = np.mean(A, axis=0)
+    centroid_B = np.mean(B, axis=0)
+    AA = A - centroid_A
+    BB = B - centroid_B
+    H = AA.T @ BB
+    U, S, Vt = np.linalg.svd(H)
+    R_ = Vt.T @ U.T
+    if np.linalg.det(R_) < 0:
+        Vt[2, :] *= -1
+        R_ = Vt.T @ U.T
+    t_ = centroid_B - R_ @ centroid_A
+    return R_, t_
+
+R_align, t_align = compute_rigid_transform(cb_cams, sfm_cams_scaled)
+
+# ----------------------------------
+# 3. Transform checkerboard points to SfM frame
+# ----------------------------------
+checker_points = []
+for rvec, tvec in zip(cb._rvecs, cb._tvecs):
+    R_board, _ = cv2.Rodrigues(rvec)
+    t_board = np.asarray(tvec).reshape(3)
+    objp = np.zeros((np.prod(cb._grid_size), 3), np.float32)
+    objp[:, :2] = np.indices(cb._grid_size).T.reshape(-1, 2)
+    objp *= cb._cell_size
+    points_world = (R_board @ objp.T + t_board.reshape(3, 1)).T
+    # Transform to SfM frame
+    points_sfm = (R_align @ points_world.T).T + t_align
+    checker_points.append(points_sfm)
+
+checker_points = np.vstack(checker_points)
+
+# ----------------------------------
+# 4. Transform checkerboard cameras to SfM frame
+# ----------------------------------
+cb_cams_sfm = (R_align @ cb_cams.T).T + t_align
+
+
+
+
+
+import sys
+sys.exit()
+
+
+
+
+
+
+## Trying to plot transformed checkerboards and cameras with scaled point cloud (but not working)
+import numpy as np
+import matplotlib.pyplot as plt
+import open3d as o3d
+
+# -----------------------------
+# 1. Load scaled SfM point cloud
+# -----------------------------
+
+pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
+points_sfm = np.asarray(pcd.points) * scale_factor
+colors_sfm = np.asarray(pcd.colors)
+
+# -----------------------------
+# 2. Checkerboard to satellite transformation
+# -----------------------------
+R_cb_to_sat = np.array([
+    [ 1.0,  0.0,  0.0],
+    [ 0.0, -1.0, -1.2246468e-16],
+    [ 0.0,  1.2246468e-16, -1.0]
+])
+t_cb_to_sat = np.array([[151.08], [-25.0], [-3.31]]) / 1000.0  # meters
+
+def cb_to_sat(points_cb):
+    """Transform points from checkerboard frame to satellite frame."""
+    return (R_cb_to_sat @ points_cb.T + t_cb_to_sat).T
+
+# -----------------------------
+# 3. Transform checkerboard points and cameras
+# -----------------------------
+# checker_points: (N,3) array of all checkerboard corner points in checkerboard frame
+# camera_positions: (M,3) array of checkerboard camera positions in checkerboard frame
+# camera_rotations: list of 3x3 camera rotations in checkerboard frame
+
+checker_points_sat = cb_to_sat(checker_points)
+cb_cams_sat = cb_to_sat(camera_positions)
+camera_rotations_sat = [R_cb_to_sat @ R_cam for R_cam in camera_rotations]
+
+# -----------------------------
+# 4. Plot everything in Matplotlib
+# -----------------------------
+fig = plt.figure(figsize=(12,12))
+ax = fig.add_subplot(111, projection='3d')
+
+# Plot scaled SfM points
+ax.scatter(points_sfm[:,0], points_sfm[:,1], points_sfm[:,2],
+           c=colors_sfm, s=1, label='SfM points', alpha=0.5)
+
+# Plot transformed checkerboard points
+ax.scatter(checker_points_sat[:,0], checker_points_sat[:,1], checker_points_sat[:,2],
+           c='blue', s=10, label='Checkerboard corners')
+
+# Plot transformed checkerboard cameras
+ax.scatter(cb_cams_sat[:,0], cb_cams_sat[:,1], cb_cams_sat[:,2],
+           c='red', s=50, marker='^', label='Checkerboard cameras')
+
+# Draw camera axes
+axis_length = cb._cell_size * max(cb._grid_size) * 0.5
+for R_cam, C_cam in zip(camera_rotations_sat, cb_cams_sat):
+    origin = C_cam
+    x_axis = origin + axis_length * R_cam[:,0]
+    y_axis = origin + axis_length * R_cam[:,1]
+    z_axis = origin + axis_length * R_cam[:,2]
+    ax.plot([origin[0], x_axis[0]], [origin[1], x_axis[1]], [origin[2], x_axis[2]], c='r')
+    ax.plot([origin[0], y_axis[0]], [origin[1], y_axis[1]], [origin[2], y_axis[2]], c='g')
+    ax.plot([origin[0], z_axis[0]], [origin[1], z_axis[1]], [origin[2], z_axis[2]], c='b')
+
+# Final plot settings
+ax.set_box_aspect([1,1,1])
+ax.set_xlabel("X (m)")
+ax.set_ylabel("Y (m)")
+ax.set_zlabel("Z (m)")
+ax.set_title("Scaled SfM Point Cloud with Checkerboards and Cameras")
+ax.legend()
+plt.show()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 ## EXTRACT MATCHED IMAGES
 # Select only matched poses
 sfm_rotations = [sfm_rotations[i] for i in matched_indices_sfm]
@@ -147,11 +457,6 @@ sfm_translations = [sfm_translations[i] for i in matched_indices_sfm]
 print(f"Number of matched poses: {len(sfm_rotations)} rotations, {len(sfm_translations)} translations")
 
 
-# These are the actual checkerboards not the pose estimates of the camera at that position
-cb.plot_checkerboards() 
-
-cb.plot_checkerboards_cameras()
-cb.plot_checkerboards_cameras_frustums(frustum_scale=0.1)
 
 
 # # Not right 
@@ -165,8 +470,18 @@ cb.plot_checkerboards_cameras_frustums(frustum_scale=0.1)
 
 
 
-# import sys
-# sys.exit()
+import sys
+sys.exit()
+
+
+
+
+
+
+
+
+
+
 
 
 
