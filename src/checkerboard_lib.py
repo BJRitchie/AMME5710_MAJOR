@@ -203,6 +203,211 @@ class Checkerboard:
         
         return rotations, translations
     
+    def plot_checkerboards_cameras(self):
+        """
+        Visualize the checkerboard poses and the camera poses in the same 3D scene.
+        Camera positions are plotted in the checkerboard/world frame.
+        """
+        assert hasattr(self, "_grid_size") and hasattr(self, "_cell_size"), \
+            "Grid size and cell size not defined."
+        assert hasattr(self, "_rvecs") and hasattr(self, "_tvecs"), \
+            "Run undistort_ims() first to compute rvecs and tvecs."
+
+        # Prepare board corner points (same as during calibration)
+        objp = np.zeros((np.prod(self._grid_size), 3), np.float32)
+        objp[:, :2] = np.indices(self._grid_size).T.reshape(-1, 2)
+        objp *= self._cell_size
+
+        geometries = []
+
+        # Axis length for plotting
+        axis_length = float(self._cell_size * self._grid_size[0] / 2)
+
+        # Colors
+        board_colors = [
+            [0.8, 0.2, 0.2],
+            [0.2, 0.8, 0.2],
+            [0.2, 0.2, 0.8],
+            [0.8, 0.6, 0.2],
+            [0.6, 0.2, 0.8],
+            [0.2, 0.8, 0.6]
+        ]
+
+        # Plot each checkerboard and its camera
+        for i, (rvec, tvec) in enumerate(zip(self._rvecs, self._tvecs)):
+            R_board, _ = cv2.Rodrigues(rvec)
+            t_board = np.asarray(tvec).reshape(3)
+
+            # ---- Checkerboard ----
+            board_points = (R_board @ objp.T + t_board.reshape(3, 1)).T
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(board_points)
+            pcd.paint_uniform_color(board_colors[i % len(board_colors)])
+            geometries.append(pcd)
+
+            # Checkerboard axes
+            axes = np.float64([[axis_length, 0, 0], [0, axis_length, 0], [0, 0, -axis_length]])
+            axes_transformed = (R_board @ axes.T + t_board.reshape(3, 1)).T
+            line_points = np.vstack([t_board, axes_transformed])
+            lines = [[0, 1], [0, 2], [0, 3]]
+            line_colors = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+            ls = o3d.geometry.LineSet()
+            ls.points = o3d.utility.Vector3dVector(line_points)
+            ls.lines = o3d.utility.Vector2iVector(lines)
+            ls.colors = o3d.utility.Vector3dVector(line_colors)
+            geometries.append(ls)
+
+            # ---- Camera ----
+            R_cam = R_board.T
+            C_cam = -R_board.T @ t_board
+
+            cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_length * 0.6)
+            cam_frame.rotate(R_cam, center=(0, 0, 0))
+            cam_frame.translate(C_cam)
+            geometries.append(cam_frame)
+
+        # Add world origin
+        world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_length * 1.2)
+        geometries.append(world_frame)
+
+        # Visualize
+        o3d.visualization.draw_geometries(
+            geometries,
+            window_name="Checkerboards and Cameras",
+            width=1024,
+            height=768,
+            mesh_show_back_face=True
+        )
+
+    def plot_checkerboards_cameras_frustums(self, frustum_scale=0.1):
+        """
+        Visualize checkerboards and camera frustums in the same 3D scene.
+        Camera frustums are colored the same as their respective checkerboard.
+        
+        Args:
+            frustum_scale (float): Overall scale for frustum size.
+        """
+        assert hasattr(self, "_grid_size") and hasattr(self, "_cell_size"), \
+            "Grid size and cell size not defined."
+        assert hasattr(self, "_rvecs") and hasattr(self, "_tvecs"), \
+            "Run undistort_ims() first to compute rvecs and tvecs."
+
+        # Prepare board corner points
+        objp = np.zeros((np.prod(self._grid_size), 3), np.float32)
+        objp[:, :2] = np.indices(self._grid_size).T.reshape(-1, 2)
+        objp *= self._cell_size
+
+        geometries = []
+
+        # Axis length for checkerboard axes
+        axis_length = float(self._cell_size * self._grid_size[0] / 2)
+
+        # Color palette
+        colors = [
+            [0.8, 0.2, 0.2],
+            [0.2, 0.8, 0.2],
+            [0.2, 0.2, 0.8],
+            [0.8, 0.6, 0.2],
+            [0.6, 0.2, 0.8],
+            [0.2, 0.8, 0.6]
+        ]
+
+        for i, (rvec, tvec) in enumerate(zip(self._rvecs, self._tvecs)):
+            R_board, _ = cv2.Rodrigues(rvec)
+            t_board = np.asarray(tvec).reshape(3)
+            color = colors[i % len(colors)]
+
+            # ---- Checkerboard ----
+            board_points = (R_board @ objp.T + t_board.reshape(3, 1)).T
+            pcd = o3d.geometry.PointCloud()
+            pcd.points = o3d.utility.Vector3dVector(board_points)
+            pcd.paint_uniform_color(color)
+            geometries.append(pcd)
+
+            # Checkerboard axes
+            axes = np.float64([[axis_length, 0, 0], [0, axis_length, 0], [0, 0, -axis_length]])
+            axes_transformed = (R_board @ axes.T + t_board.reshape(3, 1)).T
+            line_points = np.vstack([t_board, axes_transformed])
+            lines = [[0, 1], [0, 2], [0, 3]]
+            line_colors = [color for _ in lines]
+            ls = o3d.geometry.LineSet()
+            ls.points = o3d.utility.Vector3dVector(line_points)
+            ls.lines = o3d.utility.Vector2iVector(lines)
+            ls.colors = o3d.utility.Vector3dVector(line_colors)
+            geometries.append(ls)
+
+            # ---- Camera frustum ----
+            R_cam = R_board.T
+            C_cam = -R_board.T @ t_board
+
+            # Simplified pyramid frustum
+            frustum_depth = frustum_scale * 2
+            image_width, image_height = 640, 480  # assume default image size
+            fx = fy = 800  # approximate focal length (adjust if you know real values)
+            cx = image_width / 2
+            cy = image_height / 2
+
+            # Frustum corners in camera space
+            corners_cam = np.array([
+                [0, 0, 0],  # camera center
+                [(0 - cx) * frustum_depth / fx, (0 - cy) * frustum_depth / fy, frustum_depth],
+                [(image_width - cx) * frustum_depth / fx, (0 - cy) * frustum_depth / fy, frustum_depth],
+                [(image_width - cx) * frustum_depth / fx, (image_height - cy) * frustum_depth / fy, frustum_depth],
+                [(0 - cx) * frustum_depth / fx, (image_height - cy) * frustum_depth / fy, frustum_depth],
+            ])
+
+            # Transform frustum to world/checkerboard frame
+            corners_world = (R_cam @ corners_cam.T).T + C_cam
+
+            lines = [[0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [2, 3], [3, 4], [4, 1]]
+            colors_lines = [color for _ in lines]
+
+            frustum_ls = o3d.geometry.LineSet()
+            frustum_ls.points = o3d.utility.Vector3dVector(corners_world)
+            frustum_ls.lines = o3d.utility.Vector2iVector(lines)
+            frustum_ls.colors = o3d.utility.Vector3dVector(colors_lines)
+            geometries.append(frustum_ls)
+
+        # Add world origin
+        world_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_length * 1.2)
+        geometries.append(world_frame)
+
+        # Visualize
+        o3d.visualization.draw_geometries(
+            geometries,
+            window_name="Checkerboards and Camera Frustums",
+            width=1024,
+            height=768,
+            mesh_show_back_face=True
+        )
+
+
+    def get_camera_poses(self):
+        """
+        Returns the camera poses in the checkerboard/world frame.
+
+        Returns:
+            camera_rotations (list of np.ndarray): Each 3x3 rotation matrix of the camera.
+            camera_positions (list of np.ndarray): Each 3x1 camera position in the checkerboard frame.
+        """
+        camera_rotations = []
+        camera_positions = []
+
+        for rvec, tvec in zip(self._rvecs, self._tvecs):
+            R_board, _ = cv2.Rodrigues(rvec)   # checkerboard rotation in camera frame
+            t_board = np.asarray(tvec).reshape(3)  # checkerboard translation in camera frame
+
+            # Invert transformation to get camera in checkerboard/world frame
+            R_cam = R_board.T
+            C_cam = -R_board.T @ t_board
+
+            camera_rotations.append(R_cam)
+            camera_positions.append(C_cam.reshape(3, 1))
+
+        return camera_rotations, camera_positions
+
+
+    
 
 
 
