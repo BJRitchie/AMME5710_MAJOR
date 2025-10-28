@@ -1,0 +1,16 @@
+Synthetic Test Data Ground Truth
+================================
+
+Rotation (degrees): [10.0, 15.0, 20.0]
+Translation: [0.100, 0.200, 0.050]
+Noise level: 0.0000
+Number of points: 15000
+Random seed: 42
+
+Ground Truth Transformation Matrix:
+0.907673 -0.294591 0.298907 0.100000
+0.330366 0.940788 -0.075999 0.200000
+-0.258819 0.167731 0.951251 0.050000
+0.000000 0.000000 0.000000 1.000000
+
+Expected center distance: 0.000000

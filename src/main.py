@@ -8,9 +8,9 @@ from file_reading_lib import gen_images_from_vid
 # vid_path = "images/batmo.mp4"
 # vid_path = 'images/ben.mp4'
 # store_path="images/ben"
-vid_path = 'images/batmo.mp4'
+# vid_path = 'images/batmo.mp4'
 store_path="images/batmo"
-gen_images_from_vid( vid_path, store_path ) 
+# gen_images_from_vid( vid_path, store_path ) 
 
 # Storage files 
 im_path = store_path
@@ -44,12 +44,22 @@ sfm_pipeline = pipeline.StrcFromMotion (
 # sfm_pipeline.clean_pointcloud() 
 # sfm_pipeline.plot_pointcloud()
 
-# Surface matching using PPF + ICP (run after point cloud generation)
-# First, let's diagnose what went wrong with the previous attempt
-print("=== DIAGNOSING PREVIOUS ALIGNMENT FAILURE ===")
-sfm_pipeline.diagnose_alignment_failure(store_path="sat_model")
+# In your main.py
+sfm_pipeline.make_reference_ply()
 
-print("\n=== RUNNING IMPROVED SURFACE MATCHING ===")
-# Run the improved surface matching with correct path
-sfm_pipeline.surface_matching_ppf_icp(store_path="sat_model", voxel_size=0.05)
+# Generate synthetic test data
+result = sfm_pipeline.generate_synthetic_test_data(
+    rotation_degrees=[10, 15, 20],     # Small rotations
+    translation=[0.1, 0.2, 0.05],     # Small translations
+    num_points=15000,                  # Point density
+    noise_level=0.0                    # Noiseless (perfect data)
+)
+
+# Verify PPF pipeline works
+success = sfm_pipeline.verify_ppf_with_synthetic_data()
+
+
+# print("\n=== RUNNING IMPROVED SURFACE MATCHING ===")
+# # Run the improved surface matching with correct path
+# sfm_pipeline.surface_matching_ppf_icp(store_path="sat_model", voxel_size=0.05)
 

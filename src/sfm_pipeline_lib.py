@@ -225,7 +225,7 @@ class StrcFromMotion:
         if len(target_pcd.points) == 0:
             print(f"Target point cloud has no points. Check file: {pcd_path}")
             return None
-        
+
         # DIAGNOSTIC: Print point cloud properties
         print("\n=== DIAGNOSTIC INFORMATION ===")
         ref_bbox = ref_pcd.get_axis_aligned_bounding_box()
@@ -252,44 +252,61 @@ class StrcFromMotion:
         print(f"Scale ratio (ref/target): {scale_ratio:.4f}")
         print("==============================\n")
         
-        # Apply initial scale and center normalization
+        # Initial preprocessing to clean the point clouds
+        print("Initial preprocessing (before normalization)...")
+        ref_pcd_cleaned, target_pcd_cleaned = self._preprocess_point_clouds(
+            ref_pcd, target_pcd, voxel_size)
+        
+        # Recalculate properties after initial preprocessing
+        ref_cleaned_bbox = ref_pcd_cleaned.get_axis_aligned_bounding_box()
+        target_cleaned_bbox = target_pcd_cleaned.get_axis_aligned_bounding_box()
+        
+        cleaned_center_distance = np.linalg.norm(ref_cleaned_bbox.get_center() - target_cleaned_bbox.get_center())
+        cleaned_ref_scale = np.max(ref_cleaned_bbox.get_extent())
+        cleaned_target_scale = np.max(target_cleaned_bbox.get_extent())
+        cleaned_scale_ratio = cleaned_ref_scale / cleaned_target_scale if cleaned_target_scale > 0 else float('inf')
+        
+        print(f"After preprocessing:")
+        print(f"  Reference: {len(ref_pcd_cleaned.points)} points (was {len(ref_pcd.points)})")
+        print(f"  Target: {len(target_pcd_cleaned.points)} points (was {len(target_pcd.points)})")
+        print(f"  Updated center distance: {cleaned_center_distance:.4f}")
+        print(f"  Updated scale ratio: {cleaned_scale_ratio:.4f}")
+        
+        # Apply normalization to cleaned point clouds
+        print("Applying normalization to cleaned point clouds...")
         ref_pcd_normalized, target_pcd_normalized, scale_transform = self._normalize_point_clouds(
-            ref_pcd, target_pcd, center_distance, scale_ratio)
-
-        # Preprocess point clouds to remove any additional noise
-        ref_pcd_processed, target_pcd_processed = self._preprocess_point_clouds(
-            ref_pcd_normalized, target_pcd_normalized, voxel_size)
+            ref_pcd_cleaned, target_pcd_cleaned, cleaned_center_distance, cleaned_scale_ratio)
         
         # PPF-based initial alignment
         print("PPF-based initial alignment...")
-        initial_transform = self._ppf_matching(ref_pcd_processed, target_pcd_processed, voxel_size)
+        initial_transform = self._ppf_matching(ref_pcd_normalized, target_pcd_normalized, voxel_size)
         
         if initial_transform is None:
             print("PPF matching failed, using identity transformation")
             initial_transform = np.eye(4)
         
         # Apply initial transformation
-        ref_pcd_aligned = ref_pcd_processed.transform(initial_transform)
+        ref_pcd_aligned = ref_pcd_normalized.transform(initial_transform)
         
         # ICP refinement to get precise alignment
         print("ICP refinement...")
         final_transform, fitness, rmse = self._icp_refinement(
-            ref_pcd_aligned, target_pcd_processed, distance_threshold, 
+            ref_pcd_aligned, target_pcd_normalized, distance_threshold, 
             relative_fitness, relative_rmse, max_iteration)
         
         # Combine transformations
         combined_transform = final_transform @ initial_transform
         
-        # Apply final transformation to normalized reference
-        ref_pcd_final = ref_pcd_processed.transform(combined_transform)
+        # Apply final transformation to get final aligned reference
+        ref_pcd_final = ref_pcd_normalized.transform(combined_transform)
         
         # Calculate adaptive distance threshold based on target point cloud scale
-        target_extent = np.max(target_pcd_processed.get_axis_aligned_bounding_box().get_extent())
+        target_extent = np.max(target_pcd_normalized.get_axis_aligned_bounding_box().get_extent())
         adaptive_threshold = max(distance_threshold, target_extent * 0.05)  # At least 5% of object size
         print(f"Using adaptive distance threshold: {adaptive_threshold:.4f}")
         
         # Calculate alignment metrics
-        metrics = self._calculate_alignment_metrics(ref_pcd_final, target_pcd_processed, adaptive_threshold)
+        metrics = self._calculate_alignment_metrics(ref_pcd_final, target_pcd_normalized, adaptive_threshold)
         
         # Save results
         results = {
@@ -300,7 +317,7 @@ class StrcFromMotion:
             'icp_rmse': rmse,
             'alignment_metrics': metrics,
             'ref_pcd_aligned': ref_pcd_final,
-            'target_pcd': target_pcd_processed,
+            'target_pcd': target_pcd_normalized,
             'scale_transform': scale_transform,
             'adaptive_threshold': adaptive_threshold
         }
@@ -380,8 +397,8 @@ class StrcFromMotion:
             search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
         
         # Remove statistical outliers
-        ref_clean, _ = ref_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
-        target_clean, _ = target_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2.0)
+        ref_clean, _ = ref_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2)
+        target_clean, _ = target_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2)
         
         print(f"After preprocessing: \nReference: {len(ref_clean.points)} points, Target: {len(target_clean.points)} points")
         
@@ -413,9 +430,18 @@ class StrcFromMotion:
                 ],
                 o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999))
             
-            if result.fitness > 1:  # Reasonable fitness threshold
+            # Analyze alignment quality
+            quality, confidence = self._analyze_alignment_quality(
+                ref_pcd, target_pcd, result.transformation, result.fitness, result.inlier_rmse)
+            
+            # Use stricter fitness threshold for more reliable alignment
+            if result.fitness > 0.3:  # Higher threshold for better reliability
                 print(f"PPF/RANSAC success - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
                 return result.transformation
+            elif result.fitness > 0.1:
+                print(f"PPF/RANSAC marginal result - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
+                print("Warning: Low fitness may indicate incorrect alignment")
+                return result.transformation  # Still use it but warn user
             else:
                 print(f"PPF/RANSAC poor result - Fitness: {result.fitness:.4f}")
                 return None
@@ -525,31 +551,450 @@ class StrcFromMotion:
     
     def _visualize_matching_results(self, results):
         '''
-        Visualize the surface matching results
+        Visualize the surface matching results with volume centers marked
+        Shows both original (unnormalized) and final aligned point clouds
         '''
         print("Visualizing surface matching results...")
         
-        # Color point clouds differently
+        # Get the processed point clouds
         ref_aligned = results['ref_pcd_aligned']
         target = results['target_pcd']
+        
+        # Also load and show original point clouds (before normalization)
+        self._visualize_original_point_clouds()
+        
+        print("Now showing aligned results...")
         
         # Paint reference red, target blue
         ref_aligned.paint_uniform_color([1, 0, 0])  # Red
         target.paint_uniform_color([0, 0, 1])       # Blue
         
-        # Create coordinate frame
+        # Calculate volume centers (centroids)
+        ref_center = ref_aligned.get_center()
+        target_center = target.get_center()
+        
+        print(f"Reference volume center: [{ref_center[0]:.4f}, {ref_center[1]:.4f}, {ref_center[2]:.4f}]")
+        print(f"Target volume center:    [{target_center[0]:.4f}, {target_center[1]:.4f}, {target_center[2]:.4f}]")
+        
+        # Calculate distance between centers
+        center_distance = np.linalg.norm(ref_center - target_center)
+        print(f"Distance between centers: {center_distance:.4f}")
+        
+        # Create spherical markers for volume centers
+        ref_center_marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
+        ref_center_marker.translate(ref_center)
+        ref_center_marker.paint_uniform_color([1, 1, 0])  # Yellow for reference center
+        
+        target_center_marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
+        target_center_marker.translate(target_center)
+        target_center_marker.paint_uniform_color([0, 1, 0])  # Green for target center
+        
+        # Create line connecting the centers
+        line_points = [ref_center, target_center]
+        line_lines = [[0, 1]]
+        center_line = o3d.geometry.LineSet()
+        center_line.points = o3d.utility.Vector3dVector(line_points)
+        center_line.lines = o3d.utility.Vector2iVector(line_lines)
+        center_line.paint_uniform_color([1, 1, 1])  # White line
+        
+        # Create coordinate frame at origin
         coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+        
+        # Create smaller coordinate frames at each center
+        ref_coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05)
+        ref_coord_frame.translate(ref_center)
+        
+        target_coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.05)
+        target_coord_frame.translate(target_center)
+        
+        # Prepare all geometries for visualization
+        geometries = [
+            ref_aligned,           # Red point cloud
+            target,               # Blue point cloud
+            ref_center_marker,    # Yellow sphere at reference center
+            target_center_marker, # Green sphere at target center
+            center_line,          # White line connecting centers
+            coord_frame,          # Main coordinate frame at origin
+            ref_coord_frame,      # Coordinate frame at reference center
+            target_coord_frame    # Coordinate frame at target center
+        ]
         
         # Visualize
         try:
-            o3d.visualization.draw_geometries([ref_aligned, target, coord_frame],
-                                            window_name="Surface Matching Results",
+            o3d.visualization.draw_geometries(geometries,
+                                            window_name="Surface Matching Results with Centers",
                                             width=1200, height=800)
         except Exception as e:
             print(f"Visualization failed: {e}")
             print("Results saved to files for external viewing")
 
         return
+    
+    def _visualize_original_point_clouds(self):
+        '''
+        Visualize the original point clouds before any normalization/transformation
+        Shows the raw spatial relationship as they exist in their original coordinate systems
+        '''
+        print("Loading original point clouds (before normalization)...")
+        
+        # Load original reference model
+        ref_path = os.path.join(self._sat_model_path, "reference.ply")
+        ref_mesh = o3d.io.read_triangle_mesh(ref_path)
+        ref_pcd_original = ref_mesh.sample_points_uniformly(number_of_points=10000)
+        
+        # Load original target point cloud
+        target_path = os.path.join(self._sat_model_path, "points.ply")  # Assuming your point cloud is here
+        target_pcd_original = o3d.io.read_point_cloud(target_path)
+        
+        # Color them distinctly
+        ref_pcd_original.paint_uniform_color([1, 0.5, 0])    # Orange for original reference
+        target_pcd_original.paint_uniform_color([0, 0.5, 1]) # Light blue for original target
+        
+        # Calculate original centers
+        ref_original_center = ref_pcd_original.get_center()
+        target_original_center = target_pcd_original.get_center()
+        
+        print(f"Original reference center: [{ref_original_center[0]:.4f}, {ref_original_center[1]:.4f}, {ref_original_center[2]:.4f}]")
+        print(f"Original target center:    [{target_original_center[0]:.4f}, {target_original_center[1]:.4f}, {target_original_center[2]:.4f}]")
+        
+        # Calculate original distance between centers
+        original_center_distance = np.linalg.norm(ref_original_center - target_original_center)
+        print(f"Original distance between centers: {original_center_distance:.4f}")
+        
+        # Calculate original scale ratio
+        ref_original_extent = ref_pcd_original.get_axis_aligned_bounding_box().get_extent()
+        target_original_extent = target_pcd_original.get_axis_aligned_bounding_box().get_extent()
+        original_scale_ratio = np.max(ref_original_extent) / np.max(target_original_extent)
+        print(f"Original scale ratio (ref/target): {original_scale_ratio:.4f}")
+        
+        # Create center markers for original positions
+        ref_original_marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
+        ref_original_marker.translate(ref_original_center)
+        ref_original_marker.paint_uniform_color([1, 0.8, 0])  # Golden yellow
+        
+        target_original_marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
+        target_original_marker.translate(target_original_center)
+        target_original_marker.paint_uniform_color([0, 0.8, 1])  # Cyan
+        
+        # Create line connecting original centers
+        original_line_points = [ref_original_center, target_original_center]
+        original_line_lines = [[0, 1]]
+        original_center_line = o3d.geometry.LineSet()
+        original_center_line.points = o3d.utility.Vector3dVector(original_line_points)
+        original_center_line.lines = o3d.utility.Vector2iVector(original_line_lines)
+        original_center_line.paint_uniform_color([0.8, 0.8, 0.8])  # Light gray line
+        
+        # Create coordinate frame at origin
+        coord_frame_original = o3d.geometry.TriangleMesh.create_coordinate_frame(size=max(0.1, original_center_distance * 0.05))
+        
+        # Prepare geometries for original visualization
+        original_geometries = [
+            ref_pcd_original,      # Orange reference model
+            target_pcd_original,   # Light blue target
+            ref_original_marker,   # Golden yellow sphere at reference center
+            target_original_marker,# Cyan sphere at target center
+            original_center_line,  # Light gray line connecting centers
+            coord_frame_original   # Coordinate frame
+        ]
+        
+        # Show original point clouds
+        try:
+            print("Showing ORIGINAL point clouds (before normalization)...")
+            o3d.visualization.draw_geometries(original_geometries,
+                                            window_name="Original Point Clouds (Before Normalization)",
+                                            width=1200, height=800)
+        except Exception as e:
+            print(f"Original visualization failed: {e}")
+        
+        return
+    
+    def _analyze_alignment_quality(self, ref_pcd, target_pcd, transform, fitness, rmse):
+        '''
+        Analyze and explain alignment quality to help understand results
+        '''
+        print(f"\n=== ALIGNMENT QUALITY ANALYSIS ===")
+        
+        # Apply transformation to reference
+        ref_transformed = ref_pcd.transform(transform)
+        
+        # Calculate center distance after alignment
+        ref_center = ref_transformed.get_center()
+        target_center = target_pcd.get_center()
+        center_distance = np.linalg.norm(ref_center - target_center)
+        
+        print(f"PPF/RANSAC Results:")
+        print(f"  Fitness: {fitness:.4f} ({fitness*100:.1f}% of points aligned)")
+        print(f"  RMSE: {rmse:.4f}")
+        print(f"  Center distance after alignment: {center_distance:.4f}")
+        
+        # Quality assessment
+        if fitness > 0.6:
+            quality = "EXCELLENT"
+            confidence = "Very high confidence in pose"
+        elif fitness > 0.3:
+            quality = "GOOD"
+            confidence = "Good confidence in pose"
+        elif fitness > 0.1:
+            quality = "MARGINAL"
+            confidence = "Low confidence - may be incorrect pose"
+        else:
+            quality = "POOR"
+            confidence = "Very low confidence - likely incorrect"
+        
+        print(f"  Quality Assessment: {quality}")
+        print(f"  Confidence: {confidence}")
+        
+        # Check for common issues
+        if fitness < 0.3 and center_distance > 1.0:
+            print(f"WARNING: Low fitness + large center distance suggests wrong pose")
+        
+        if fitness > 0.1 and center_distance > 0.5:
+            print(f"WARNING: Alignment may be partially correct but globally wrong")
+        
+        print("=====================================\n")
+        
+        return quality, confidence
+    
+    def generate_synthetic_test_data(self, rotation_degrees=[10, 15, 20], translation=[0.1, 0.2, 0.05], 
+                                   num_points=15000, noise_level=0.0, random_seed=42):
+        '''
+        Generate synthetic test point cloud from reference model with known transformation.
+        This creates a clean test case to verify PPF pipeline functionality.
+        
+        Args:
+            rotation_degrees: [rx, ry, rz] rotation in degrees around each axis
+            translation: [tx, ty, tz] translation in model units
+            num_points: Number of points to sample from reference model
+            noise_level: Standard deviation of Gaussian noise to add (0.0 = noiseless)
+            random_seed: Random seed for reproducible results
+        
+        Returns:
+            dict: Contains transformation info and file paths
+        '''
+        print("=== Generating Synthetic Test Data ===")
+        
+        # Set random seed for reproducibility
+        np.random.seed(random_seed)
+        
+        # Load reference model
+        ref_path = os.path.join(self._sat_model_path, "reference.ply")
+        if not os.path.exists(ref_path):
+            print(f"Reference model not found at {ref_path}")
+            print("Run make_reference_ply() first")
+            return None
+            
+        ref_mesh = o3d.io.read_triangle_mesh(ref_path)
+        
+        # Sample points from reference model
+        ref_pcd = ref_mesh.sample_points_uniformly(number_of_points=num_points)
+        print(f"Sampled {len(ref_pcd.points)} points from reference model")
+        
+        # Create the known transformation matrix
+        from scipy.spatial.transform import Rotation
+        
+        # Convert rotation from degrees to radians and create rotation matrix
+        rotation_rad = np.radians(rotation_degrees)
+        r = Rotation.from_euler('xyz', rotation_rad)
+        R = r.as_matrix()
+        
+        # Create 4x4 transformation matrix
+        known_transform = np.eye(4)
+        known_transform[:3, :3] = R
+        known_transform[:3, 3] = translation
+        
+        print(f"Applied transformation:")
+        print(f"  Rotation (degrees): [{rotation_degrees[0]:.1f}, {rotation_degrees[1]:.1f}, {rotation_degrees[2]:.1f}]")
+        print(f"  Translation: [{translation[0]:.3f}, {translation[1]:.3f}, {translation[2]:.3f}]")
+        
+        # Apply transformation to create synthetic target
+        synthetic_pcd = ref_pcd.transform(known_transform)
+        
+        # Add noise if specified
+        if noise_level > 0.0:
+            points = np.asarray(synthetic_pcd.points)
+            noise = np.random.normal(0, noise_level, points.shape)
+            points += noise
+            synthetic_pcd.points = o3d.utility.Vector3dVector(points)
+            print(f"Added Gaussian noise with std dev: {noise_level:.4f}")
+        
+        # Save synthetic point cloud
+        synthetic_path = os.path.join(self._sat_model_path, "points.ply")
+        o3d.io.write_point_cloud(synthetic_path, synthetic_pcd)
+        print(f"Saved synthetic point cloud to: {synthetic_path}")
+        
+        # Calculate and display statistics
+        ref_center = ref_pcd.get_center()
+        synthetic_center = synthetic_pcd.get_center()
+        center_distance = np.linalg.norm(synthetic_center - ref_center)
+        
+        print(f"\nSynthetic data statistics:")
+        print(f"  Reference center: [{ref_center[0]:.4f}, {ref_center[1]:.4f}, {ref_center[2]:.4f}]")
+        print(f"  Synthetic center: [{synthetic_center[0]:.4f}, {synthetic_center[1]:.4f}, {synthetic_center[2]:.4f}]")
+        print(f"  Center distance: {center_distance:.4f}")
+        
+        # Save transformation info for verification
+        transform_info_path = os.path.join(self._sat_model_path, "synthetic_ground_truth.txt")
+        with open(transform_info_path, 'w') as f:
+            f.write("Synthetic Test Data Ground Truth\n")
+            f.write("================================\n\n")
+            f.write(f"Rotation (degrees): [{rotation_degrees[0]:.1f}, {rotation_degrees[1]:.1f}, {rotation_degrees[2]:.1f}]\n")
+            f.write(f"Translation: [{translation[0]:.3f}, {translation[1]:.3f}, {translation[2]:.3f}]\n")
+            f.write(f"Noise level: {noise_level:.4f}\n")
+            f.write(f"Number of points: {num_points}\n")
+            f.write(f"Random seed: {random_seed}\n\n")
+            f.write("Ground Truth Transformation Matrix:\n")
+            np.savetxt(f, known_transform, fmt='%.6f')
+            f.write(f"\nExpected center distance: {center_distance:.6f}\n")
+        
+        print(f"Ground truth transformation saved to: {transform_info_path}")
+        
+        # Optionally visualize the synthetic data
+        self._visualize_synthetic_data(ref_pcd, synthetic_pcd)
+        
+        return {
+            'known_transform': known_transform,
+            'rotation_degrees': rotation_degrees,
+            'translation': translation,
+            'noise_level': noise_level,
+            'num_points': num_points,
+            'center_distance': center_distance,
+            'synthetic_path': synthetic_path,
+            'ground_truth_path': transform_info_path
+        }
+    
+    def _visualize_synthetic_data(self, ref_pcd, synthetic_pcd):
+        '''
+        Visualize the reference and synthetic point clouds
+        '''
+        print("Visualizing synthetic test data...")
+        
+        # Create copies for visualization
+        import copy
+        ref_pcd_vis = copy.deepcopy(ref_pcd)
+        synthetic_pcd_vis = copy.deepcopy(synthetic_pcd)
+        
+        ref_pcd_vis.paint_uniform_color([0, 1, 0])      # Green for reference
+        synthetic_pcd_vis.paint_uniform_color([1, 0, 0]) # Red for synthetic target
+        
+        # Create coordinate frame
+        coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+        
+        # Add center markers
+        ref_center = ref_pcd.get_center()
+        synthetic_center = synthetic_pcd.get_center()
+        
+        ref_marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
+        ref_marker.translate(ref_center)
+        ref_marker.paint_uniform_color([0, 0.8, 0])  # Dark green
+        
+        synthetic_marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
+        synthetic_marker.translate(synthetic_center)
+        synthetic_marker.paint_uniform_color([0.8, 0, 0])  # Dark red
+        
+        # Connect centers with line
+        line_points = [ref_center, synthetic_center]
+        line_lines = [[0, 1]]
+        center_line = o3d.geometry.LineSet()
+        center_line.points = o3d.utility.Vector3dVector(line_points)
+        center_line.lines = o3d.utility.Vector2iVector(line_lines)
+        center_line.paint_uniform_color([1, 1, 0])  # Yellow line
+        
+        # Visualize
+        geometries = [ref_pcd_vis, synthetic_pcd_vis, ref_marker, synthetic_marker, 
+                     center_line, coord_frame]
+        
+        try:
+            o3d.visualization.draw_geometries(geometries,
+                                            window_name="Synthetic Test Data (Green=Reference, Red=Target)",
+                                            width=1200, height=800)
+        except Exception as e:
+            print(f"Visualization failed: {e}")
+    
+    def verify_ppf_with_synthetic_data(self, expected_accuracy_threshold=0.01):
+        '''
+        Run PPF matching on synthetic data and verify against ground truth.
+        This validates that your PPF pipeline works correctly.
+        
+        Args:
+            expected_accuracy_threshold: Maximum acceptable error in transformation
+        '''
+        print("=== Verifying PPF Pipeline with Synthetic Data ===")
+        
+        # Check if synthetic data exists
+        synthetic_path = os.path.join(self._sat_model_path, "points.ply")
+        ground_truth_path = os.path.join(self._sat_model_path, "synthetic_ground_truth.txt")
+        
+        if not os.path.exists(synthetic_path):
+            print("No synthetic data found. Run generate_synthetic_test_data() first.")
+            return False
+        
+        if not os.path.exists(ground_truth_path):
+            print("No ground truth found. Run generate_synthetic_test_data() first.")
+            return False
+        
+        # Load ground truth transformation
+        with open(ground_truth_path, 'r') as f:
+            lines = f.readlines()
+            
+        # Find transformation matrix in file
+        matrix_start = None
+        for i, line in enumerate(lines):
+            if "Ground Truth Transformation Matrix:" in line:
+                matrix_start = i + 1
+                break
+        
+        if matrix_start is None:
+            print("Could not find ground truth transformation matrix")
+            return False
+        
+        ground_truth_transform = np.loadtxt(ground_truth_path, skiprows=matrix_start, max_rows=4)
+        
+        # Run surface matching
+        print("Running surface matching on synthetic data...")
+        result = self.surface_matching_ppf_icp(store_path="synthetic", voxel_size=0.02)
+        
+        if result is None:
+            print("❌ Surface matching failed completely")
+            return False
+        
+        # Compare estimated vs ground truth
+        estimated_transform = result['combined_transform']
+        
+        # Calculate transformation error
+        transform_error = np.linalg.norm(estimated_transform - ground_truth_transform)
+        
+        # Calculate rotation and translation errors separately
+        R_est = estimated_transform[:3, :3]
+        t_est = estimated_transform[:3, 3]
+        R_gt = ground_truth_transform[:3, :3]
+        t_gt = ground_truth_transform[:3, 3]
+        
+        rotation_error = np.linalg.norm(R_est - R_gt)
+        translation_error = np.linalg.norm(t_est - t_gt)
+        
+        print(f"\n=== VERIFICATION RESULTS ===")
+        print(f"Ground Truth Transform:")
+        print(f"  Rotation matrix error: {rotation_error:.6f}")
+        print(f"  Translation error: {translation_error:.6f}")
+        print(f"  Total transformation error: {transform_error:.6f}")
+        print(f"  ICP Fitness: {result['icp_fitness']:.4f}")
+        print(f"  ICP RMSE: {result['icp_rmse']:.6f}")
+        
+        # Determine success
+        success = (transform_error < expected_accuracy_threshold and 
+                  result['icp_fitness'] > 0.5)
+        
+        if success:
+            print(f"✅ VERIFICATION PASSED - PPF pipeline working correctly!")
+            print(f"   Error {transform_error:.6f} < threshold {expected_accuracy_threshold}")
+        else:
+            print(f"❌ VERIFICATION FAILED")
+            if transform_error >= expected_accuracy_threshold:
+                print(f"   Transformation error {transform_error:.6f} >= threshold {expected_accuracy_threshold}")
+            if result['icp_fitness'] <= 0.5:
+                print(f"   ICP fitness {result['icp_fitness']:.4f} too low (should be > 0.5)")
+        
+        return success
     
     def run_surface_matching_pipeline(self, store_path="0"):
         '''
