@@ -129,7 +129,7 @@ class StrcFromMotion:
         path = os.path.join( self._sparse_path, store_path, "points.ply" ) 
         pcd = o3d.io.read_point_cloud( path ) 
         
-        # Apply radis outlier removal 
+        # Apply radius outlier removal 
         # TODO - tune radius and points, or replace with statistical outlier 
         cl, ind = pcd.remove_radius_outlier( nb_points = nb_points, radius = radius )
         
@@ -140,6 +140,38 @@ class StrcFromMotion:
         o3d.io.write_point_cloud(path, denoised_pcd, write_ascii=False, compressed=False) 
 
         return 
+    
+    def stat_clean_pointcloud(self, store_path="0", nb_neighbors=20, std_ratio=2.0):
+        """
+        Clean the point cloud using Statistical Outlier Removal (SOR).
+        
+        Parameters:
+            store_path (str): Relative folder inside sparse path, e.g. "0".
+            nb_neighbors (int): Number of neighbors to analyze for each point.
+            std_ratio (float): Standard deviation multiplier — lower removes more points.
+        """
+        import os
+        import open3d as o3d
+
+        # Load point cloud
+        path = os.path.join(self._sparse_path, store_path, "points.ply")
+        pcd = o3d.io.read_point_cloud(path)
+
+        # Apply Statistical Outlier Removal
+        cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors,
+                                                std_ratio=std_ratio)
+
+        # Keep only inliers
+        denoised_pcd = pcd.select_by_index(ind)
+
+        # Save cleaned point cloud (overwrite original)
+        o3d.io.write_point_cloud(path, denoised_pcd, write_ascii=False, compressed=False)
+
+        print(f"Cleaned point cloud saved to: {path}")
+        print(f"Original points: {len(pcd.points)}, after cleaning: {len(denoised_pcd.points)}")
+
+        return denoised_pcd
+
 
     ################### Internal Funcs #####################
     def _clean_up(self, paths): 
