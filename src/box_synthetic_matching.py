@@ -192,7 +192,7 @@ import copy
 # ref_pcd, target_pcd, gt = generate_complex_test_pcds()
 
 
-# To get satellite
+# # To get satellite
 # sfm_pipeline.make_reference_ply()
 
 # # Load reference model
@@ -206,7 +206,7 @@ import copy
 # ref_mesh = o3d.io.read_triangle_mesh(ref_path)
 
 # # Sample points from reference model
-# num_points = 15000
+# num_points = 20000
 # ref_pcd = ref_mesh.sample_points_uniformly(number_of_points=num_points)
 # print(f"Sampled {len(ref_pcd.points)} points from reference model")
 
@@ -398,7 +398,7 @@ ref_pcd, target_pcd, gt = generate_ppf_friendly_cubesat(num_points=20000, noise_
 
 
 # Generate test point clouds
-test_data = sfm_pipeline.generate_synthetic_test_data_from_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05], noise_level = 0.01)
+test_data = sfm_pipeline.generate_synthetic_test_data_from_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05]) #  , noise_level = 0.001)
 # test_data = sfm_pipeline.generate_synthetic_test_data_from_pcd(ref_pcd, rotation_degrees=[5,15,56], translation=[0.9,0.2,0.5])
 
 

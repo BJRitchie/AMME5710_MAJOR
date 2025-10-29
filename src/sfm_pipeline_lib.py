@@ -1496,10 +1496,6 @@ class StrcFromMotion:
 
 
 
-
-
-
-
     def generate_synthetic_test_data_from_pcd(self, ref_pcd, rotation_degrees=[10, 15, 20], translation=[0.1,0.2,0.05], 
                                             noise_level=0.0, random_seed=42):
         """
@@ -1597,7 +1593,10 @@ class StrcFromMotion:
             init=T_est, estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane()
         )
 
+        # TODO CHECK THIS WITH INVERSE
+
         combined_transform = icp_result.transformation
+        # combined_transform = np.linalg.inv(combined_transform)
 
         # --- Visualize after alignment ---
         # target_aligned = copy.deepcopy(target_pcd).transform(combined_transform)
