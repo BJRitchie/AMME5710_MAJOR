@@ -46,9 +46,6 @@ sfm_pipeline = pipeline.StrcFromMotion (
 
 
 
-
-
-
 # In your main.py
 sfm_pipeline.make_reference_ply()
 
