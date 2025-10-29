@@ -56,48 +56,86 @@ import open3d as o3d
 import numpy as np
 import copy
 
-def generate_test_pcds():
-    # Create a non-symmetric shape with good geometry
-    mesh = o3d.geometry.TriangleMesh.create_box(width=1.0, height=0.6, depth=0.4)
+# def generate_test_pcds():
+#     # Create a non-symmetric shape with good geometry
+#     mesh = o3d.geometry.TriangleMesh.create_box(width=1.0, height=0.6, depth=0.4)
+#     mesh.compute_vertex_normals()
+#     ref_pcd = mesh.sample_points_poisson_disk(5000)
+
+#     # Define a known transform (small rotation + translation)
+#     angle = np.deg2rad(15)
+#     R = ref_pcd.get_rotation_matrix_from_xyz((angle, angle / 2, angle / 3))
+#     t = np.array([0.2, 0.1, 0.05])
+#     transform_gt = np.eye(4)
+#     transform_gt[:3, :3] = R
+#     transform_gt[:3, 3] = t
+
+#     # Apply transform to get target point cloud
+#     target_pcd = copy.deepcopy(ref_pcd).transform(transform_gt)
+
+#     # Add tiny bit of noise to make features unique
+#     target_pts = np.asarray(target_pcd.points)
+#     target_pts += np.random.normal(scale=0.001, size=target_pts.shape)
+#     target_pcd.points = o3d.utility.Vector3dVector(target_pts)
+
+
+#     # Visualize the reference and target clouds
+#     ref_vis = copy.deepcopy(ref_pcd)
+#     ref_vis.paint_uniform_color([0.1, 0.8, 0.1])   # green (reference)
+
+#     target_vis = copy.deepcopy(target_pcd)
+#     target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # red (transformed)
+
+#     # Combine them for visualization
+#     o3d.visualization.draw_geometries(
+#         [ref_vis, target_vis],
+#         window_name="Reference (green) vs Transformed (red)",
+#         width=900,
+#         height=700,
+#         point_show_normal=False
+#     )
+
+#     return ref_pcd, target_pcd, transform_gt
+
+
+# ref_pcd, target_pcd, gt = generate_test_pcds()
+
+
+def generate_synthetic_satellite():
+    """
+    Generate a satellite-like point cloud with planar panels
+    """
+    # Create box panels to simulate satellite body
+    body = o3d.geometry.TriangleMesh.create_box(width=1.0, height=0.6, depth=0.4)
+    panel1 = o3d.geometry.TriangleMesh.create_box(width=0.2, height=0.02, depth=0.6)
+    panel1.translate((0.0, 0.3, 0.0))
+    panel2 = copy.deepcopy(panel1).translate((0.8, 0.3, 0.0))
+    
+    mesh = body + panel1 + panel2
     mesh.compute_vertex_normals()
-    ref_pcd = mesh.sample_points_poisson_disk(5000)
+    
+    # Sample points densely
+    ref_pcd = mesh.sample_points_poisson_disk(15000)
+    
+    # Apply small rotation + translation
+    angle = np.deg2rad([5.0, 5.0, 5.0])
+    R = ref_pcd.get_rotation_matrix_from_xyz(angle)
+    t = np.array([0.1, 0.2, 0.05])
+    T_gt = np.eye(4)
+    T_gt[:3,:3] = R
+    T_gt[:3,3] = t
+    
+    target_pcd = copy.deepcopy(ref_pcd).transform(T_gt)
+    
+    # Add small noise
+    pts = np.asarray(target_pcd.points)
+    pts += np.random.normal(scale=0.001, size=pts.shape)
+    target_pcd.points = o3d.utility.Vector3dVector(pts)
+    
+    return ref_pcd, target_pcd, T_gt
 
-    # Define a known transform (small rotation + translation)
-    angle = np.deg2rad(15)
-    R = ref_pcd.get_rotation_matrix_from_xyz((angle, angle / 2, angle / 3))
-    t = np.array([0.2, 0.1, 0.05])
-    transform_gt = np.eye(4)
-    transform_gt[:3, :3] = R
-    transform_gt[:3, 3] = t
+ref_pcd, target_pcd, gt = generate_synthetic_satellite()
 
-    # Apply transform to get target point cloud
-    target_pcd = copy.deepcopy(ref_pcd).transform(transform_gt)
-
-    # Add tiny bit of noise to make features unique
-    target_pts = np.asarray(target_pcd.points)
-    target_pts += np.random.normal(scale=0.001, size=target_pts.shape)
-    target_pcd.points = o3d.utility.Vector3dVector(target_pts)
-
-
-    # Visualize the reference and target clouds
-    ref_vis = copy.deepcopy(ref_pcd)
-    ref_vis.paint_uniform_color([0.1, 0.8, 0.1])   # green (reference)
-
-    target_vis = copy.deepcopy(target_pcd)
-    target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # red (transformed)
-
-    # Combine them for visualization
-    o3d.visualization.draw_geometries(
-        [ref_vis, target_vis],
-        window_name="Reference (green) vs Transformed (red)",
-        width=900,
-        height=700,
-        point_show_normal=False
-    )
-
-    return ref_pcd, target_pcd, transform_gt
-
-ref_pcd, target_pcd, gt = generate_test_pcds()
 T_est = sfm_pipeline._ppf_matching(ref_pcd, target_pcd, voxel_size=0.02)
 
 print("GT:\n", gt)
@@ -121,4 +159,5 @@ target_vis.paint_uniform_color([0.8, 0.1, 0.1])    # red = target
 o3d.visualization.draw_geometries([ref_aligned, target_vis],
                                   window_name="Aligned Reference vs Target",
                                   width=900, height=700)
+
 

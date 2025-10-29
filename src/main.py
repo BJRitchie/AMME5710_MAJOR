@@ -52,20 +52,13 @@ sfm_pipeline.make_reference_ply()
 result = sfm_pipeline.generate_synthetic_test_data(
     rotation_degrees=[5, 5, 5],     # Small rotations
     translation=[0.1, 0.2, 0.05],     # Small translations
+    # translation=[0, 0, 0],     # Small translations
     num_points=15000,                  # Point density
     noise_level=0.0                    # Noiseless (perfect data)
 )
 
-# result = sfm_pipeline.generate_synthetic_test_data(
-#     rotation_degrees=[0, 0, 0],     # Small rotations
-#     translation=[0, 0, 0],     # Small translations
-#     num_points=15000,                  # Point density
-#     noise_level=0.0                    # Noiseless (perfect data)
-# )
-
 # Verify PPF pipeline works
 success = sfm_pipeline.verify_ppf_with_synthetic_data()
-
 
 # print("\n=== RUNNING IMPROVED SURFACE MATCHING ===")
 # # Run the improved surface matching with correct path
