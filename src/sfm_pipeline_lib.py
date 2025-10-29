@@ -931,14 +931,15 @@ class StrcFromMotion:
             print(f"Visualization failed: {e}")
 
 
+    # # Most recent
     # def verify_ppf_with_synthetic_data(self, expected_accuracy_threshold=0.01):
-    #     '''
+    #     """
     #     Run PPF matching on synthetic data and verify against ground truth.
-    #     Uses keypoints for robust PPF alignment.
+    #     Uses keypoints for robust PPF alignment, with fallback to downsampled clouds.
         
     #     Args:
     #         expected_accuracy_threshold: Maximum acceptable error in transformation
-    #     '''
+    #     """
     #     import open3d as o3d
     #     import os
     #     import numpy as np
@@ -970,171 +971,66 @@ class StrcFromMotion:
     #         return False
     #     ground_truth_transform = np.loadtxt(ground_truth_path, skiprows=matrix_start, max_rows=4)
 
-    #     # Preprocess: extract keypoints for both reference and synthetic
-    #     voxel_size = 0.02
+    #     # Create synthetic target by applying ground truth
+    #     target_pcd = copy.deepcopy(ref_pcd).transform(ground_truth_transform)
+
+    #     voxel_size = 0.01 # 0.02
+
+    #     # Compute normals on original clouds
+    #     for pcd in [ref_pcd, target_pcd]:
+    #         pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
+
+    #     # Function to extract keypoints, fallback to downsampled cloud
     #     def preprocess_keypoints(pcd, voxel_size):
-    #         pcd_down = pcd.voxel_down_sample(voxel_size)
-    #         pcd_down.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
-    #         keypoints = o3d.geometry.keypoint.compute_iss_keypoints(pcd_down,
-    #                                                                 salient_radius=voxel_size*5,
-    #                                                                 non_max_radius=voxel_size*2)
-    #         keypoints.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
+    #         keypoints = o3d.geometry.keypoint.compute_iss_keypoints(
+    #             # pcd, salient_radius=voxel_size*5, non_max_radius=voxel_size*2)
+    #             pcd, salient_radius=voxel_size*10, non_max_radius=voxel_size*3)
+
+    #         if len(keypoints.points) < 10:
+    #             # Fallback to voxel-downsampled cloud
+    #             keypoints = pcd.voxel_down_sample(voxel_size)
+    #             keypoints.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
     #         return keypoints
 
     #     ref_keypoints = preprocess_keypoints(ref_pcd, voxel_size)
-
-    #     # Create synthetic target by applying ground truth transform
-    #     target_pcd = copy.deepcopy(ref_pcd).transform(ground_truth_transform)
     #     target_keypoints = preprocess_keypoints(target_pcd, voxel_size)
 
-    #     # Run PPF + RANSAC using the keypoints
+    #     # --- Visualize before alignment ---
+    #     ref_vis = copy.deepcopy(ref_pcd)
+    #     target_vis = copy.deepcopy(target_pcd)
+    #     ref_vis.paint_uniform_color([0.1, 0.8, 0.1])   # green
+    #     target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # red
+    #     o3d.visualization.draw_geometries(
+    #         [ref_vis, target_vis],
+    #         window_name="Before Alignment",
+    #         width=900, height=700, point_show_normal=False
+    #     )
+
+    #     # Run PPF + RANSAC
     #     T_est = self._ppf_matching(ref_keypoints, target_keypoints, voxel_size=voxel_size)
     #     if T_est is None:
     #         print("❌ PPF matching failed, using identity transformation")
     #         T_est = np.eye(4)
 
-    #     # ICP refinement for final alignment
+    #     # ICP refinement
     #     icp_result = o3d.pipelines.registration.registration_icp(
     #         target_pcd, ref_pcd, max_correspondence_distance=voxel_size*5,
     #         init=T_est, estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane()
     #     )
-
     #     combined_transform = icp_result.transformation @ T_est
+
+    #     # --- Visualize after alignment ---
+    #     target_aligned_vis = copy.deepcopy(target_pcd).transform(combined_transform)
+    #     target_aligned_vis.paint_uniform_color([0.8, 0.1, 0.1])
+    #     ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+    #     o3d.visualization.draw_geometries(
+    #         [ref_vis, target_aligned_vis],
+    #         window_name="After Alignment",
+    #         width=900, height=700, point_show_normal=False
+    #     )
 
     #     # Compare estimated vs ground truth
     #     transform_error = np.linalg.norm(combined_transform - ground_truth_transform)
-
-    #     R_est = combined_transform[:3, :3]
-    #     t_est = combined_transform[:3, 3]
-    #     R_gt = ground_truth_transform[:3, :3]
-    #     t_gt = ground_truth_transform[:3, 3]
-
-    #     rotation_error = np.linalg.norm(R_est - R_gt)
-    #     translation_error = np.linalg.norm(t_est - t_gt)
-
-    #     print("\nGround truth transform:\n", ground_truth_transform)
-    #     print("Estimated transform:\n", combined_transform)
-    #     print("\n=== VERIFICATION RESULTS ===")
-    #     print(f"Rotation matrix error: {rotation_error:.6f}")
-    #     print(f"Translation error: {translation_error:.6f}")
-    #     print(f"Total transformation error: {transform_error:.6f}")
-    #     print(f"ICP Fitness: {icp_result.fitness:.4f}")
-    #     print(f"ICP RMSE: {icp_result.inlier_rmse:.6f}")
-
-    #     success = (transform_error < expected_accuracy_threshold and icp_result.fitness > 0.5)
-    #     if success:
-    #         print(f"✅ VERIFICATION PASSED - PPF pipeline working correctly!")
-    #         print(f"   Error {transform_error:.6f} < threshold {expected_accuracy_threshold}")
-    #     else:
-    #         print(f"❌ VERIFICATION FAILED")
-    #         if transform_error >= expected_accuracy_threshold:
-    #             print(f"   Transformation error {transform_error:.6f} >= threshold {expected_accuracy_threshold}")
-    #         if icp_result.fitness <= 0.5:
-    #             print(f"   ICP fitness {icp_result.fitness:.4f} too low (should be > 0.5)")
-
-    #     return success
-
-    # With keypoints but not finding normals
-    # def verify_ppf_with_synthetic_data(self, expected_accuracy_threshold=0.01):
-    #     """
-    #     Run PPF matching on synthetic data and verify against ground truth.
-    #     Uses keypoints for robust PPF alignment, with separate visualizations
-    #     for before and after alignment.
-
-    #     Args:
-    #         expected_accuracy_threshold: Maximum acceptable error in transformation
-    #     """
-    #     import open3d as o3d
-    #     import os
-    #     import numpy as np
-    #     import copy
-
-    #     print("=== Verifying PPF Pipeline with Synthetic Data ===")
-
-    #     # Paths
-    #     synthetic_path = os.path.join(self._sat_model_path, "points.ply")
-    #     ground_truth_path = os.path.join(self._sat_model_path, "synthetic_ground_truth.txt")
-
-    #     if not os.path.exists(synthetic_path) or not os.path.exists(ground_truth_path):
-    #         print("No synthetic data or ground truth found. Run generate_synthetic_test_data() first.")
-    #         return False
-
-    #     # Load synthetic point cloud
-    #     ref_pcd = o3d.io.read_point_cloud(synthetic_path)
-
-    #     # Load ground truth transform
-    #     with open(ground_truth_path, 'r') as f:
-    #         lines = f.readlines()
-    #     matrix_start = None
-    #     for i, line in enumerate(lines):
-    #         if "Ground Truth Transformation Matrix:" in line:
-    #             matrix_start = i + 1
-    #             break
-    #     if matrix_start is None:
-    #         print("Could not find ground truth transformation matrix")
-    #         return False
-    #     ground_truth_transform = np.loadtxt(ground_truth_path, skiprows=matrix_start, max_rows=4)
-
-    #     # Preprocess: extract keypoints for both reference and synthetic
-    #     voxel_size = 0.02
-    #     def preprocess_keypoints(pcd, voxel_size):
-    #         pcd_down = pcd.voxel_down_sample(voxel_size)
-    #         pcd_down.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
-    #         keypoints = o3d.geometry.keypoint.compute_iss_keypoints(
-    #             pcd_down,
-    #             salient_radius=voxel_size*5,
-    #             non_max_radius=voxel_size*2
-    #         )
-    #         keypoints.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
-    #         return keypoints
-
-    #     ref_keypoints = preprocess_keypoints(ref_pcd, voxel_size)
-
-    #     # Create synthetic target by applying ground truth transform
-    #     target_pcd = copy.deepcopy(ref_pcd).transform(ground_truth_transform)
-    #     target_keypoints = preprocess_keypoints(target_pcd, voxel_size)
-
-    #     # --- Visualization BEFORE alignment ---
-    #     ref_vis = copy.deepcopy(ref_pcd)
-    #     target_vis = copy.deepcopy(target_pcd)
-    #     ref_vis.paint_uniform_color([0.1, 0.8, 0.1])    # Green (reference)
-    #     target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # Red (target)
-    #     o3d.visualization.draw_geometries(
-    #         [ref_vis, target_vis],
-    #         window_name="Before Alignment: Green=Ref, Red=Target",
-    #         width=1000,
-    #         height=700,
-    #         point_show_normal=False
-    #     )
-
-    #     # Run PPF + RANSAC using the keypoints
-    #     T_est = self._ppf_matching(ref_keypoints, target_keypoints, voxel_size=voxel_size)
-    #     if T_est is None:
-    #         print("❌ PPF matching failed, using identity transformation")
-    #         T_est = np.eye(4)
-
-    #     # ICP refinement for final alignment
-    #     icp_result = o3d.pipelines.registration.registration_icp(
-    #         target_pcd, ref_pcd, max_correspondence_distance=voxel_size*5,
-    #         init=T_est, estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane()
-    #     )
-    #     combined_transform = icp_result.transformation @ T_est
-
-    #     # --- Visualization AFTER alignment ---
-    #     ref_vis_aligned = copy.deepcopy(ref_pcd)
-    #     target_aligned_vis = copy.deepcopy(target_pcd).transform(combined_transform)
-    #     ref_vis_aligned.paint_uniform_color([0.1, 0.8, 0.1])    # Green
-    #     target_aligned_vis.paint_uniform_color([0.1, 0.1, 0.8]) # Blue (aligned target)
-    #     o3d.visualization.draw_geometries(
-    #         [ref_vis_aligned, target_aligned_vis],
-    #         window_name="After Alignment: Green=Ref, Blue=Aligned Target",
-    #         width=1000,
-    #         height=700,
-    #         point_show_normal=False
-    #     )
-
-    #     # Compute errors
-    #     transform_error = np.linalg.norm(combined_transform - ground_truth_transform)
     #     R_est = combined_transform[:3, :3]
     #     t_est = combined_transform[:3, 3]
     #     R_gt = ground_truth_transform[:3, :3]
@@ -1163,13 +1059,14 @@ class StrcFromMotion:
     #             print(f"   ICP fitness {icp_result.fitness:.4f} too low (should be > 0.5)")
 
     #     return success
+
 
 
     def verify_ppf_with_synthetic_data(self, expected_accuracy_threshold=0.01):
         """
-        Run PPF matching on synthetic data and verify against ground truth.
-        Uses keypoints for robust PPF alignment, with fallback to downsampled clouds.
-        
+        Run synthetic alignment verification using PPF + ICP, with fallback to voxel-downsampled ICP.
+        Visualizes point clouds before and after alignment.
+
         Args:
             expected_accuracy_threshold: Maximum acceptable error in transformation
         """
@@ -1188,10 +1085,8 @@ class StrcFromMotion:
             print("No synthetic data or ground truth found. Run generate_synthetic_test_data() first.")
             return False
 
-        # Load synthetic point cloud
+        # Load point clouds
         ref_pcd = o3d.io.read_point_cloud(synthetic_path)
-
-        # Load ground truth transform
         with open(ground_truth_path, 'r') as f:
             lines = f.readlines()
         matrix_start = None
@@ -1204,65 +1099,55 @@ class StrcFromMotion:
             return False
         ground_truth_transform = np.loadtxt(ground_truth_path, skiprows=matrix_start, max_rows=4)
 
-        # Create synthetic target by applying ground truth
+        # Create synthetic target
         target_pcd = copy.deepcopy(ref_pcd).transform(ground_truth_transform)
-
-        voxel_size = 0.01 # 0.02
-
-        # Compute normals on original clouds
-        for pcd in [ref_pcd, target_pcd]:
-            pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
-
-        # Function to extract keypoints, fallback to downsampled cloud
-        def preprocess_keypoints(pcd, voxel_size):
-            keypoints = o3d.geometry.keypoint.compute_iss_keypoints(
-                # pcd, salient_radius=voxel_size*5, non_max_radius=voxel_size*2)
-                pcd, salient_radius=voxel_size*10, non_max_radius=voxel_size*3)
-
-            if len(keypoints.points) < 10:
-                # Fallback to voxel-downsampled cloud
-                keypoints = pcd.voxel_down_sample(voxel_size)
-                keypoints.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
-            return keypoints
-
-        ref_keypoints = preprocess_keypoints(ref_pcd, voxel_size)
-        target_keypoints = preprocess_keypoints(target_pcd, voxel_size)
 
         # --- Visualize before alignment ---
         ref_vis = copy.deepcopy(ref_pcd)
+        ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
         target_vis = copy.deepcopy(target_pcd)
-        ref_vis.paint_uniform_color([0.1, 0.8, 0.1])   # green
-        target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # red
-        o3d.visualization.draw_geometries(
-            [ref_vis, target_vis],
-            window_name="Before Alignment",
-            width=900, height=700, point_show_normal=False
-        )
+        target_vis.paint_uniform_color([0.8, 0.1, 0.1])
+        o3d.visualization.draw_geometries([ref_vis, target_vis], window_name="Before Alignment")
 
-        # Run PPF + RANSAC
-        T_est = self._ppf_matching(ref_keypoints, target_keypoints, voxel_size=voxel_size)
-        if T_est is None:
-            print("❌ PPF matching failed, using identity transformation")
+        voxel_size = 0.005  # coarse alignment
+
+        # Compute normals
+        for pcd in [ref_pcd, target_pcd]:
+            pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
+
+        # --- Attempt PPF matching ---
+        try:
+            T_est = self._ppf_matching(ref_pcd, target_pcd, voxel_size=voxel_size)
+            if T_est is None:
+                raise RuntimeError("PPF returned None")
+        except Exception as e:
+            print(f"PPF matching failed, falling back to voxel-downsampled ICP: {e}")
+            # Fallback: voxel-downsampled ICP coarse alignment
+            ref_down = ref_pcd.voxel_down_sample(voxel_size)
+            target_down = target_pcd.voxel_down_sample(voxel_size)
             T_est = np.eye(4)
+            icp_coarse = o3d.pipelines.registration.registration_icp(
+                target_down, ref_down, max_correspondence_distance=voxel_size*5,
+                init=T_est, estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint()
+            )
+            T_est = icp_coarse.transformation
 
-        # ICP refinement
+        # --- ICP refinement ---
         icp_result = o3d.pipelines.registration.registration_icp(
             target_pcd, ref_pcd, max_correspondence_distance=voxel_size*5,
             init=T_est, estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane()
         )
-        combined_transform = icp_result.transformation @ T_est
+
+        combined_transform = icp_result.transformation
 
         # --- Visualize after alignment ---
-        target_aligned_vis = copy.deepcopy(target_pcd).transform(combined_transform)
-        target_aligned_vis.paint_uniform_color([0.8, 0.1, 0.1])
+        target_aligned = copy.deepcopy(target_pcd).transform(combined_transform)
+        target_aligned.paint_uniform_color([0.8, 0.1, 0.1])
+        ref_vis = copy.deepcopy(ref_pcd)
         ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
-        o3d.visualization.draw_geometries(
-            [ref_vis, target_aligned_vis],
-            window_name="After Alignment",
-            width=900, height=700, point_show_normal=False
-        )
+        o3d.visualization.draw_geometries([ref_vis, target_aligned], window_name="After Alignment")
 
-        # Compare estimated vs ground truth
+        # --- Compute errors ---
         transform_error = np.linalg.norm(combined_transform - ground_truth_transform)
         R_est = combined_transform[:3, :3]
         t_est = combined_transform[:3, 3]
@@ -1282,7 +1167,7 @@ class StrcFromMotion:
 
         success = (transform_error < expected_accuracy_threshold and icp_result.fitness > 0.5)
         if success:
-            print(f"✅ VERIFICATION PASSED - PPF pipeline working correctly!")
+            print(f"✅ VERIFICATION PASSED - Pipeline working correctly!")
             print(f"   Error {transform_error:.6f} < threshold {expected_accuracy_threshold}")
         else:
             print(f"❌ VERIFICATION FAILED")
@@ -1610,3 +1495,139 @@ class StrcFromMotion:
 
 
 
+
+
+
+
+
+    def generate_synthetic_test_data_from_pcd(self, ref_pcd, rotation_degrees=[10, 15, 20], translation=[0.1,0.2,0.05], 
+                                            noise_level=0.0, random_seed=42):
+        """
+        Create synthetic target point cloud by applying a known transform to a given reference point cloud.
+
+        Args:
+            ref_pcd: Open3D PointCloud object (reference)
+            rotation_degrees: rotation [rx, ry, rz] in degrees
+            translation: translation vector [tx, ty, tz]
+            noise_level: Gaussian noise std deviation
+            random_seed: reproducibility
+
+        Returns:
+            dict: synthetic target, known transform
+        """
+        import numpy as np
+        import copy
+        from scipy.spatial.transform import Rotation
+
+        np.random.seed(random_seed)
+
+        # Copy reference cloud
+        ref_pcd_copy = copy.deepcopy(ref_pcd)
+
+        # Rotation matrix
+        rotation_rad = np.radians(rotation_degrees)
+        r = Rotation.from_euler('xyz', rotation_rad)
+        R = r.as_matrix()
+
+        # 4x4 transformation
+        transform_gt = np.eye(4)
+        transform_gt[:3,:3] = R
+        transform_gt[:3,3] = translation
+
+        # Apply transform
+        synthetic_pcd = copy.deepcopy(ref_pcd_copy).transform(transform_gt)
+
+        # Add noise
+        if noise_level > 0:
+            points = np.asarray(synthetic_pcd.points)
+            points += np.random.normal(scale=noise_level, size=points.shape)
+            synthetic_pcd.points = o3d.utility.Vector3dVector(points)
+
+        return {
+            "ref_pcd": ref_pcd_copy,
+            "synthetic_pcd": synthetic_pcd,
+            "transform_gt": transform_gt
+        }
+
+
+
+    def verify_ppf_with_provided_pcds(self, ref_pcd, target_pcd, ground_truth_transform, expected_accuracy_threshold=0.01):
+        """
+        Verifies PPF + ICP on provided reference and target point clouds.
+        Visualizes before and after alignment.
+        """
+        import open3d as o3d
+        import copy
+        import numpy as np
+
+        print("=== Verifying PPF Pipeline with Provided Point Clouds ===")
+
+        # --- Visualize before alignment ---
+        ref_vis = copy.deepcopy(ref_pcd)
+        ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+        target_vis = copy.deepcopy(target_pcd)
+        target_vis.paint_uniform_color([0.8, 0.1, 0.1])
+        o3d.visualization.draw_geometries([ref_vis, target_vis], window_name="Before Alignment")
+
+        voxel_size = 0.005
+
+        # Compute normals
+        for pcd in [ref_pcd, target_pcd]:
+            pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
+
+        # --- PPF matching ---
+        try:
+            T_est = self._ppf_matching(ref_pcd, target_pcd, voxel_size=voxel_size)
+            if T_est is None:
+                raise RuntimeError("PPF returned None")
+        except Exception as e:
+            print(f"PPF matching failed, falling back to voxel-downsampled ICP: {e}")
+            ref_down = ref_pcd.voxel_down_sample(voxel_size)
+            target_down = target_pcd.voxel_down_sample(voxel_size)
+            T_est = np.eye(4)
+            icp_coarse = o3d.pipelines.registration.registration_icp(
+                target_down, ref_down, max_correspondence_distance=voxel_size*5,
+                init=T_est, estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint()
+            )
+            T_est = icp_coarse.transformation
+
+        # ICP refinement
+        icp_result = o3d.pipelines.registration.registration_icp(
+            target_pcd, ref_pcd, max_correspondence_distance=voxel_size*5,
+            init=T_est, estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane()
+        )
+
+        combined_transform = icp_result.transformation
+
+        # --- Visualize after alignment ---
+        # target_aligned = copy.deepcopy(target_pcd).transform(combined_transform)
+        target_aligned = copy.deepcopy(target_pcd).transform(np.linalg.inv(combined_transform))
+        target_aligned.paint_uniform_color([0.8, 0.1, 0.1])
+        ref_vis = copy.deepcopy(ref_pcd)
+        ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+        o3d.visualization.draw_geometries([ref_vis, target_aligned], window_name="After Alignment")
+
+        # Compute errors
+        transform_error = np.linalg.norm(combined_transform - ground_truth_transform)
+        R_est = combined_transform[:3, :3]
+        t_est = combined_transform[:3, 3]
+        R_gt = ground_truth_transform[:3, :3]
+        t_gt = ground_truth_transform[:3, 3]
+        rotation_error = np.linalg.norm(R_est - R_gt)
+        translation_error = np.linalg.norm(t_est - t_gt)
+
+        print("\nGround truth transform:\n", ground_truth_transform)
+        print("Estimated transform:\n", combined_transform)
+        print("\n=== VERIFICATION RESULTS ===")
+        print(f"Rotation matrix error: {rotation_error:.6f}")
+        print(f"Translation error: {translation_error:.6f}")
+        print(f"Total transformation error: {transform_error:.6f}")
+        print(f"ICP Fitness: {icp_result.fitness:.4f}")
+        print(f"ICP RMSE: {icp_result.inlier_rmse:.6f}")
+
+        success = (transform_error < expected_accuracy_threshold and icp_result.fitness > 0.5)
+        if success:
+            print(f"✅ VERIFICATION PASSED")
+        else:
+            print(f"❌ VERIFICATION FAILED")
+        return success

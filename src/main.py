@@ -45,6 +45,10 @@ sfm_pipeline = pipeline.StrcFromMotion (
 # sfm_pipeline.plot_pointcloud()
 
 
+
+
+
+
 # In your main.py
 sfm_pipeline.make_reference_ply()
 
@@ -60,9 +64,9 @@ result = sfm_pipeline.generate_synthetic_test_data(
 # Verify PPF pipeline works
 success = sfm_pipeline.verify_ppf_with_synthetic_data()
 
-# print("\n=== RUNNING IMPROVED SURFACE MATCHING ===")
-# # Run the improved surface matching with correct path
-# sfm_pipeline.surface_matching_ppf_icp(store_path="sat_model", voxel_size=0.05)
+print("\n=== RUNNING IMPROVED SURFACE MATCHING ===")
+# Run the improved surface matching with correct path
+sfm_pipeline.surface_matching_ppf_icp(store_path="sat_model", voxel_size=0.05)
 
 
 
