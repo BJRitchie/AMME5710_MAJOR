@@ -272,14 +272,18 @@ class StrcFromMotion:
         print(f"  Updated center distance: {cleaned_center_distance:.4f}")
         print(f"  Updated scale ratio: {cleaned_scale_ratio:.4f}")
         
-        # Apply normalization to cleaned point clouds
-        print("Applying normalization to cleaned point clouds...")
-        ref_pcd_normalized, target_pcd_normalized, scale_transform = self._normalize_point_clouds(
-            ref_pcd_cleaned, target_pcd_cleaned, cleaned_center_distance, cleaned_scale_ratio)
+        # # Apply normalization to cleaned point clouds
+        # print("Applying normalization to cleaned point clouds...")
+        # ref_pcd_normalized, target_pcd_normalized, scale_transform = self._normalize_point_clouds(
+        #     ref_pcd_cleaned, target_pcd_cleaned, cleaned_center_distance, cleaned_scale_ratio)
         
+        print("\nTESTING: DISABLED NORMALISATION\n")
+        ref_pcd_normalized, target_pcd_normalized = ref_pcd_cleaned, target_pcd_cleaned
+        scale_transform = np.eye(4)
+
         # PPF-based initial alignment
         print("PPF-based initial alignment...")
-        initial_transform = self._ppf_matching(ref_pcd_normalized, target_pcd_normalized, voxel_size)
+        initial_transform = self._ppf_matching(ref_pcd_normalized, target_pcd_normalized, voxel_size = 0.005)
         
         if initial_transform is None:
             print("PPF matching failed, using identity transformation")
@@ -404,51 +408,159 @@ class StrcFromMotion:
         
         return ref_clean, target_clean
     
+    # OLD VERSION
+    # def _ppf_matching(self, ref_pcd, target_pcd, voxel_size):
+    #     '''
+    #     Perform Point Pair Features (PPF) matching for initial alignment
+    #     '''
+    #     try:
+    #         # Prepare PPF matching
+    #         distance_threshold = voxel_size * 1.5
+            
+    #         # Use RANSAC-based global registration with FPFH features
+    #         # Compute FPFH features
+    #         radius_feature = voxel_size * 5
+    #         ref_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+    #             ref_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
+    #         target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+    #             target_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
+            
+    #         # RANSAC-based global registration
+    #         result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+    #             ref_pcd, target_pcd, ref_fpfh, target_fpfh, True, distance_threshold,
+    #             o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+    #             3, [
+    #                 o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
+    #                 o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
+    #             ],
+    #             o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999))
+            
+    #         # Analyze alignment quality
+    #         quality, confidence = self._analyze_alignment_quality(
+    #             ref_pcd, target_pcd, result.transformation, result.fitness, result.inlier_rmse)
+            
+    #         # Use stricter fitness threshold for more reliable alignment
+    #         if result.fitness > 0.3:  # Higher threshold for better reliability
+    #             print(f"PPF/RANSAC success - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
+    #             return result.transformation
+    #         elif result.fitness > 0.1:
+    #             print(f"PPF/RANSAC marginal result - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
+    #             print("Warning: Low fitness may indicate incorrect alignment")
+    #             return result.transformation  # Still use it but warn user
+    #         else:
+    #             print(f"PPF/RANSAC poor result - Fitness: {result.fitness:.4f}")
+    #             return None
+                
+    #     except Exception as e:
+    #         print(f"PPF matching failed: {e}")
+    #         return None
+
+    # def _ppf_matching(self, ref_pcd, target_pcd, voxel_size):
+    #     '''
+    #     Improved PPF-like matching using FPFH + RANSAC with safer parameters.
+    #     '''
+    #     try:
+    #         # Ensure both point clouds have normals
+    #         normal_radius = max(voxel_size * 2.0, 0.01)
+    #         ref_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=normal_radius, max_nn=50))
+    #         target_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=normal_radius, max_nn=50))
+
+    #         # Use bigger feature radius (relative to voxel)
+    #         radius_feature = max(voxel_size * 10.0, 0.05)
+    #         ref_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+    #             ref_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=200))
+    #         target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+    #             target_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=200))
+
+    #         distance_threshold = max(voxel_size * 1.5, 0.01)
+
+    #         # Use 4-point RANSAC (more stable than 3), relax edge length checker to 0.8
+    #         result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+    #             ref_pcd, target_pcd, ref_fpfh, target_fpfh, mutual_filter=True,
+    #             max_correspondence_distance=distance_threshold,
+    #             estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+    #             ransac_n=4,
+    #             checkers=[
+    #                 o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.8),
+    #                 o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
+    #             ],
+    #             criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(500000, 0.999)
+    #         )
+
+    #         print(f"RANSAC result: fitness={result.fitness:.6f}, inlier_rmse={result.inlier_rmse:.6f}")
+    #         if result.fitness > 0.2:
+    #             return result.transformation
+    #         elif result.fitness > 0.08:
+    #             print("Marginal RANSAC result; returning transformation but proceed with caution")
+    #             return result.transformation
+    #         else:
+    #             print("RANSAC failed to find a reliable transform (low fitness).")
+    #             return None
+
+    #     except Exception as e:
+    #         print(f"PPF matching failed exception: {e}")
+    #         return None
+
     def _ppf_matching(self, ref_pcd, target_pcd, voxel_size):
-        '''
-        Perform Point Pair Features (PPF) matching for initial alignment
-        '''
+        """
+        Improved PPF-like matching using FPFH + RANSAC with automatic orientation check.
+        Returns the transform that best aligns ref_pcd to target_pcd.
+        """
         try:
-            # Prepare PPF matching
-            distance_threshold = voxel_size * 1.5
-            
-            # Use RANSAC-based global registration with FPFH features
-            # Compute FPFH features
-            radius_feature = voxel_size * 5
+            # Ensure both point clouds have normals
+            normal_radius = max(voxel_size * 2.0, 0.01)
+            ref_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=normal_radius, max_nn=50))
+            target_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=normal_radius, max_nn=50))
+
+            # Use bigger feature radius for more stable FPFH features
+            radius_feature = max(voxel_size * 10.0, 0.05)
             ref_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
-                ref_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
+                ref_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=200))
             target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
-                target_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=100))
-            
+                target_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=200))
+
+            distance_threshold = max(voxel_size * 1.5, 0.01)
+
             # RANSAC-based global registration
             result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
-                ref_pcd, target_pcd, ref_fpfh, target_fpfh, True, distance_threshold,
-                o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
-                3, [
-                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.9),
+                ref_pcd, target_pcd, ref_fpfh, target_fpfh, mutual_filter=True,
+                max_correspondence_distance=distance_threshold,
+                estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+                ransac_n=4,
+                checkers=[
+                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.8),
                     o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
                 ],
-                o3d.pipelines.registration.RANSACConvergenceCriteria(100000, 0.999))
-            
-            # Analyze alignment quality
-            quality, confidence = self._analyze_alignment_quality(
-                ref_pcd, target_pcd, result.transformation, result.fitness, result.inlier_rmse)
-            
-            # Use stricter fitness threshold for more reliable alignment
-            if result.fitness > 0.3:  # Higher threshold for better reliability
-                print(f"PPF/RANSAC success - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
-                return result.transformation
-            elif result.fitness > 0.1:
-                print(f"PPF/RANSAC marginal result - Fitness: {result.fitness:.4f}, RMSE: {result.inlier_rmse:.4f}")
-                print("Warning: Low fitness may indicate incorrect alignment")
-                return result.transformation  # Still use it but warn user
-            else:
-                print(f"PPF/RANSAC poor result - Fitness: {result.fitness:.4f}")
+                criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(500000, 0.999)
+            )
+
+            print(f"RANSAC result: fitness={result.fitness:.6f}, inlier_rmse={result.inlier_rmse:.6f}")
+
+            if result.fitness < 0.08:
+                print("RANSAC failed to find a reliable transform (low fitness).")
                 return None
-                
+
+            # Check alignment quality: direct vs inverse
+            def mean_distance(T):
+                aligned = copy.deepcopy(ref_pcd).transform(T)
+                distances = np.asarray(aligned.compute_point_cloud_distance(target_pcd))
+                return distances.mean()
+
+            direct_dist = mean_distance(result.transformation)
+            inv_dist = mean_distance(np.linalg.inv(result.transformation))
+
+            if inv_dist < direct_dist:
+                print(f"Using inverse of RANSAC transform (mean distance {inv_dist:.6f} < {direct_dist:.6f})")
+                return np.linalg.inv(result.transformation)
+            else:
+                print(f"Using direct RANSAC transform (mean distance {direct_dist:.6f})")
+                return result.transformation
+
         except Exception as e:
-            print(f"PPF matching failed: {e}")
+            print(f"PPF matching failed exception: {e}")
             return None
+
+
     
     def _icp_refinement(self, ref_pcd, target_pcd, distance_threshold, 
                        relative_fitness, relative_rmse, max_iteration):
@@ -961,7 +1073,12 @@ class StrcFromMotion:
         estimated_transform = result['combined_transform']
         
         # Calculate transformation error
+        # TODO CHANGE THIS? SUGGESTED FROM CHAT 
         transform_error = np.linalg.norm(estimated_transform - ground_truth_transform)
+
+        print("Ground truth transform:\n", ground_truth_transform)
+        print("Estimated transform:\n", estimated_transform)
+
         
         # Calculate rotation and translation errors separately
         R_est = estimated_transform[:3, :3]

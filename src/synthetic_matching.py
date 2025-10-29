@@ -1,0 +1,124 @@
+import pycolmap
+
+
+# Summary 
+# New PPF matching function (relaxed/less strict) 
+# Take inverse trnasformation of PPF result
+
+
+
+# My packages 
+import sfm_pipeline_lib as pipeline 
+from file_reading_lib import gen_images_from_vid 
+
+# Convert the video into images 
+# vid_path = "images/batmo.mp4"
+# vid_path = 'images/ben.mp4'
+# store_path="images/ben"
+# vid_path = 'images/batmo.mp4'
+store_path="images/batmo"
+# gen_images_from_vid( vid_path, store_path ) 
+
+# Storage files 
+im_path = store_path
+db_path = "database.db"
+sparse_path = "sparse"
+dense_path = "dense"
+sat_model_path = "sat_model"
+
+# Settings 
+sift_ops = pycolmap.SiftExtractionOptions()
+sift_ops.use_gpu = False # CPU only 
+sift_ops.first_octave = 0
+sift_ops.num_octaves = 4
+
+# Initialise the pipeline 
+sfm_pipeline = pipeline.StrcFromMotion ( 
+    db_path, im_path, sparse_path, dense_path, sat_model_path,
+    cam_mode    =pycolmap.CameraMode.AUTO, 
+    cam_model   ="SIMPLE_RADIAL",  
+    reader_ops  =pycolmap.ImageReaderOptions(), 
+    sift_ops    =sift_ops, 
+    device      =pycolmap.Device.cpu 
+) 
+
+# sfm_pipeline.make_reference_ply()
+# sfm_pipeline.plot_reference_model()
+
+# sfm_pipeline.resize_ims( store_path, 1200, 10 )
+# sfm_pipeline.prep_pointcloud() 
+# sfm_pipeline.make_pointcloud()
+# sfm_pipeline.clean_pointcloud() 
+# sfm_pipeline.plot_pointcloud()
+
+
+import open3d as o3d
+import numpy as np
+import copy
+
+def generate_test_pcds():
+    # Create a non-symmetric shape with good geometry
+    mesh = o3d.geometry.TriangleMesh.create_box(width=1.0, height=0.6, depth=0.4)
+    mesh.compute_vertex_normals()
+    ref_pcd = mesh.sample_points_poisson_disk(5000)
+
+    # Define a known transform (small rotation + translation)
+    angle = np.deg2rad(15)
+    R = ref_pcd.get_rotation_matrix_from_xyz((angle, angle / 2, angle / 3))
+    t = np.array([0.2, 0.1, 0.05])
+    transform_gt = np.eye(4)
+    transform_gt[:3, :3] = R
+    transform_gt[:3, 3] = t
+
+    # Apply transform to get target point cloud
+    target_pcd = copy.deepcopy(ref_pcd).transform(transform_gt)
+
+    # Add tiny bit of noise to make features unique
+    target_pts = np.asarray(target_pcd.points)
+    target_pts += np.random.normal(scale=0.001, size=target_pts.shape)
+    target_pcd.points = o3d.utility.Vector3dVector(target_pts)
+
+
+    # Visualize the reference and target clouds
+    ref_vis = copy.deepcopy(ref_pcd)
+    ref_vis.paint_uniform_color([0.1, 0.8, 0.1])   # green (reference)
+
+    target_vis = copy.deepcopy(target_pcd)
+    target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # red (transformed)
+
+    # Combine them for visualization
+    o3d.visualization.draw_geometries(
+        [ref_vis, target_vis],
+        window_name="Reference (green) vs Transformed (red)",
+        width=900,
+        height=700,
+        point_show_normal=False
+    )
+
+    return ref_pcd, target_pcd, transform_gt
+
+ref_pcd, target_pcd, gt = generate_test_pcds()
+T_est = sfm_pipeline._ppf_matching(ref_pcd, target_pcd, voxel_size=0.02)
+
+print("GT:\n", gt)
+print("Estimated:\n", T_est)
+
+
+
+ref_vis = copy.deepcopy(ref_pcd)
+target_vis = copy.deepcopy(target_pcd)
+
+# Align reference to target
+ref_aligned = copy.deepcopy(ref_vis).transform(T_est)
+
+# Compute mean distance
+dist = np.mean(np.linalg.norm(np.asarray(ref_aligned.points) - np.asarray(target_vis.points), axis=1))
+print("Mean distance after alignment:", dist)
+
+ref_aligned.paint_uniform_color([0.1, 0.8, 0.1])   # green = aligned reference
+target_vis.paint_uniform_color([0.8, 0.1, 0.1])    # red = target
+
+o3d.visualization.draw_geometries([ref_aligned, target_vis],
+                                  window_name="Aligned Reference vs Target",
+                                  width=900, height=700)
+
