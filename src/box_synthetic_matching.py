@@ -393,13 +393,13 @@ def generate_ppf_friendly_cubesat(num_points=20000, noise_std=0.001):
     return ref_pcd, target_pcd, T_gt
 
 # Usage:
-ref_pcd, target_pcd, gt = generate_ppf_friendly_cubesat()
+ref_pcd, target_pcd, gt = generate_ppf_friendly_cubesat(num_points=20000, noise_std=0.001)
 
 
 
 # Generate test point clouds
-test_data = sfm_pipeline.generate_synthetic_test_data_from_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05])
-# test_data = sfm_pipeline.generate_synthetic_test_data_from_pcd(ref_pcd, rotation_degrees=[10,5,25], translation=[0.1,2,0.5])
+test_data = sfm_pipeline.generate_synthetic_test_data_from_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05], noise_level = 0.01)
+# test_data = sfm_pipeline.generate_synthetic_test_data_from_pcd(ref_pcd, rotation_degrees=[5,15,56], translation=[0.9,0.2,0.5])
 
 
 
