@@ -6,35 +6,35 @@ from file_reading_lib import gen_images_from_vid
 import checkerboard_lib as checkerboard
 
 
-## GENERATE SFM CLASS ##
-# Convert the video into images 
-store_path= "images/checker_nasa_box"
-vid_path = 'images/checker_nasa_box.mp4'
-gen_images_from_vid( vid_path, store_path ) 
+# ## GENERATE SFM CLASS ##
+# # Convert the video into images 
+# store_path= "images/checker_nasa_box"
+# vid_path = 'images/checker_nasa_box.mp4'
+# gen_images_from_vid( vid_path, store_path ) 
 
 
-# Storage files 
-im_path = store_path
-db_path = "database.db"
-sparse_path = "sparse"
-dense_path = "dense"
-sat_model_path = "sat_model"
+# # Storage files 
+# im_path = store_path
+# db_path = "database.db"
+# sparse_path = "sparse"
+# dense_path = "dense"
+# sat_model_path = "sat_model"
 
-# Settings 
-sift_ops = pycolmap.SiftExtractionOptions()
-sift_ops.use_gpu = False # CPU only 
-sift_ops.first_octave = 0
-sift_ops.num_octaves = 4
+# # Settings 
+# sift_ops = pycolmap.SiftExtractionOptions()
+# sift_ops.use_gpu = False # CPU only 
+# sift_ops.first_octave = 0
+# sift_ops.num_octaves = 4
 
-# Initialise the pipeline 
-sfm_pipeline = pipeline.StrcFromMotion ( 
-    db_path, im_path, sparse_path, dense_path, sat_model_path,
-    cam_mode    =pycolmap.CameraMode.AUTO, 
-    cam_model   ="SIMPLE_RADIAL",  
-    reader_ops  =pycolmap.ImageReaderOptions(), 
-    sift_ops    =sift_ops, 
-    device      =pycolmap.Device.cpu 
-) 
+# # Initialise the pipeline 
+# sfm_pipeline = pipeline.StrcFromMotion ( 
+#     db_path, im_path, sparse_path, dense_path, sat_model_path,
+#     cam_mode    =pycolmap.CameraMode.AUTO, 
+#     cam_model   ="SIMPLE_RADIAL",  
+#     reader_ops  =pycolmap.ImageReaderOptions(), 
+#     sift_ops    =sift_ops, 
+#     device      =pycolmap.Device.cpu 
+# ) 
 
 
 ## GENERATE REF SYNTHETIC POINT CLOUD ##
@@ -52,27 +52,39 @@ sfm_pipeline = pipeline.StrcFromMotion (
 # ref_pcd, _, _ = gen.generate_complex_satellite_pcd()
 # ref_pcd, _, _ = gen.generate_synthetic_satellite()
 
-ref_pcd = gen.generate_test_pcds_sat()
+test_data = gen.generate_test_pcds_bbs(num_points=100000)
+
+# ref_pcd = gen.generate_test_pcds_sat()
 # test_data = gen.generate_test_pcds_plane()
 
 # ## GENERATE TEST SYNTHETIC POINT CLOUD ##
 # test_data = sfm_pipeline.generate_synthetic_test_data_from_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05]) #  , noise_level = 0.001)
 
 
-# ## OR INPUT SFM POINT CLOUD
-sfm_pipeline.make_reference_ply()
-sfm_pipeline.plot_reference_model()
+# # ## OR INPUT SFM POINT CLOUD
+# sfm_pipeline.make_reference_ply()
+# sfm_pipeline.plot_reference_model()
 
-sfm_pipeline.resize_ims( store_path, 1200, 1 )
-sfm_pipeline.prep_pointcloud() 
-sfm_pipeline.make_pointcloud()
-# sfm_pipeline.clean_pointcloud()
-# sfm_pipeline.clean_pointcloud(nb_points = 80, radius = 0.25) 
-# sfm_pipeline.stat_clean_pointcloud()
-sfm_pipeline.plot_pointcloud()
+# sfm_pipeline.resize_ims( store_path, 1200, 1 )
+# sfm_pipeline.prep_pointcloud() 
+# sfm_pipeline.make_pointcloud()
+# # sfm_pipeline.clean_pointcloud()
+# # sfm_pipeline.clean_pointcloud(nb_points = 80, radius = 0.25) 
+# # sfm_pipeline.stat_clean_pointcloud()
+# sfm_pipeline.plot_pointcloud()
 
 
-test_data = gen.generate_data_from_sfm(ref_pcd)
+# test_data = gen.generate_data_from_sfm(ref_pcd)
+import pickle
+with open("sfm_pipeline.pkl", "rb") as f:
+    sfm_pipeline = pickle.load(f)
+
+with open("checkerboard.pkl", "rb") as f:
+    cb = pickle.load(f)
+
+print("Loaded saved SfM pipeline and checkerboard data")
+
+
 
 # Verify PPF
 success = sfm_pipeline.verify_ppf_with_provided_pcds(

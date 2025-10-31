@@ -180,7 +180,7 @@ pcd = stat_clean_pointcloud(pcd, nb_neighbors=30, std_ratio=1.0)
 pcd = clean_pointcloud(pcd, nb_points=30, radius=5.0)
 
 # Smooth boundaries (mild statistical clean)
-pcd = stat_clean_pointcloud(pcd, nb_neighbors=50, std_ratio=1.3)
+pcd = stat_clean_pointcloud(pcd, nb_neighbors=60, std_ratio=1)
 
 
 o3d.io.write_point_cloud("sparse/0/points_cleaned.ply", pcd)
