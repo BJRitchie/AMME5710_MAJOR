@@ -141,7 +141,7 @@ class StrcFromMotion:
         # Store back in ply file 
         o3d.io.write_point_cloud(path, denoised_pcd, write_ascii=False, compressed=False) 
 
-        return 
+        return denoised_pcd
     
     def make_reference_ply( self, ref_path="reference.ply" ):
         '''

@@ -328,9 +328,9 @@ def generate_ppf_friendly_cubesat(num_points=20000, noise_std=0.001):
 
 def generate_test_pcds_sat():
     # Create a box of dimensions 3cm x 2cm x 1cm (converted to meters)
-    width = 0.195 # 0.03   # 3 cm
-    height = 0.105 # 0.02  # 2 cm
-    depth = 0.082 # 0.01   # 1 cm
+    width = 0.195 # 0.03   # 3 cm 19.5cm
+    height = 0.105 # 0.02  # 2 cm 10.5cm
+    depth = 0.082 # 0.01   # 1 cm 8.2cm
     mesh = o3d.geometry.TriangleMesh.create_box(width=width, height=height, depth=depth)
     mesh.compute_vertex_normals()
 
