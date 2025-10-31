@@ -14,7 +14,7 @@ import checkerboard_lib as checkerboard
 store_path= "images/checker_nasa_box"
 vid_path = 'images/checker_nasa_box.mp4'
 sfm_save_path = "images/checker_nasa_box_sfm"
-gen_images_from_vid( vid_path, store_path ) 
+# gen_images_from_vid( vid_path, store_path ) 
 
 # Storage files 
 im_path = store_path
@@ -23,67 +23,69 @@ sparse_path = "sparse"
 dense_path = "dense"
 sat_model_path = "sat_model"
 
-# Settings 
-sift_ops = pycolmap.SiftExtractionOptions()
-sift_ops.use_gpu = False # CPU only 
-sift_ops.first_octave = 0
-sift_ops.num_octaves = 4
+# # Settings 
+# sift_ops = pycolmap.SiftExtractionOptions()
+# sift_ops.use_gpu = False # CPU only 
+# sift_ops.first_octave = 0
+# sift_ops.num_octaves = 4
 
-# Initialise the pipeline 
-sfm_pipeline = pipeline.StrcFromMotion ( 
-    db_path, im_path, sparse_path, dense_path, sat_model_path,
-    cam_mode    =pycolmap.CameraMode.AUTO, 
-    cam_model   ="SIMPLE_RADIAL",  
-    reader_ops  =pycolmap.ImageReaderOptions(), 
-    sift_ops    =sift_ops, 
-    device      =pycolmap.Device.cpu 
-) 
+# # Initialise the pipeline 
+# sfm_pipeline = pipeline.StrcFromMotion ( 
+#     db_path, im_path, sparse_path, dense_path, sat_model_path,
+#     cam_mode    =pycolmap.CameraMode.AUTO, 
+#     cam_model   ="SIMPLE_RADIAL",  
+#     reader_ops  =pycolmap.ImageReaderOptions(), 
+#     sift_ops    =sift_ops, 
+#     device      =pycolmap.Device.cpu 
+# ) 
 
-# Make SFM point cloud 
-sfm_pipeline.make_reference_ply()
-sfm_pipeline.plot_reference_model()
+# # Make SFM point cloud 
+# sfm_pipeline.make_reference_ply()
+# sfm_pipeline.plot_reference_model()
 
-sfm_pipeline.resize_ims( store_path, 1200, 3 )
-sfm_pipeline.prep_pointcloud() 
-sfm_pipeline.make_pointcloud()
-sfm_pipeline.clean_pointcloud() 
-sfm_pipeline.plot_pointcloud()
-
-
-# Save only the images that SfM used
-sfm_pipeline.save_registered_images(output_folder=sfm_save_path)
+# sfm_pipeline.resize_ims( store_path, 1200, 1 )
+# sfm_pipeline.prep_pointcloud() 
+# sfm_pipeline.make_pointcloud()
+# sfm_pipeline.clean_pointcloud() 
+# sfm_pipeline.plot_pointcloud()
 
 
-# Checkerboard detection on images the SFM used 
-cb = checkerboard.Checkerboard() 
-cb.read_ims(sfm_save_path) 
-cb.undistort_ims(grid_size=(3, 3), cell_size=0.0096)
-cb.plot_checkerboards() 
+# # Save only the images that SfM used
+# sfm_pipeline.save_registered_images(output_folder=sfm_save_path)
 
 
-# Save pipeline state for future reuse
-with open("sfm_pipeline.pkl", "wb") as f:
-    pickle.dump(sfm_pipeline, f)
-print("Saved SfM pipeline to 'sfm_pipeline.pkl'")
+# # Checkerboard detection on images the SFM used 
+# cb = checkerboard.Checkerboard() 
+# cb.read_ims(sfm_save_path) 
+# cb.undistort_ims(grid_size=(3, 3), cell_size=0.0096)
+# cb.plot_checkerboards() 
 
-with open("checkerboard.pkl", "wb") as f:
-    pickle.dump(cb, f)
-print("Saved checkerboard data to 'checkerboard.pkl'")
+
+# # Save pipeline state for future reuse
+# with open("sfm_pipeline.pkl", "wb") as f:
+#     pickle.dump(sfm_pipeline, f)
+# print("Saved SfM pipeline to 'sfm_pipeline.pkl'")
+
+# with open("checkerboard.pkl", "wb") as f:
+#     pickle.dump(cb, f)
+# print("Saved checkerboard data to 'checkerboard.pkl'")
 
 # Load in pickle files
-# with open("sfm_pipeline.pkl", "rb") as f:
-#     sfm_pipeline = pickle.load(f)
+with open("sfm_pipeline.pkl", "rb") as f:
+    sfm_pipeline = pickle.load(f)
 
-# with open("checkerboard.pkl", "rb") as f:
-#     cb = pickle.load(f)
+with open("checkerboard.pkl", "rb") as f:
+    cb = pickle.load(f)
 
-# print("Loaded saved SfM pipeline and checkerboard data")
+print("Loaded saved SfM pipeline and checkerboard data")
 
 
 
 
 # Checkerboard camera poses 
 checker_rotations, checker_translations = cb.get_camera_poses()
+checker_translations = np.array(checker_translations)[:, :, 0].T # turn into 3xN
+checker_rotations = np.array(checker_rotations).transpose(1, 2, 0) # turn into 3xN
 
 # Old function to plot so doesn't use get_camera_poses but still visualises it 
 def plot_in_checkerboard_frame(cb):
@@ -134,7 +136,7 @@ def plot_in_checkerboard_frame(cb):
         mesh_show_back_face=True
     )
 
-plot_in_checkerboard_frame(cb)
+# plot_in_checkerboard_frame(cb)
 
 
 # Get SFM camera poses 
@@ -165,7 +167,11 @@ def match_sfm_camera_poses(cb, sparse_path = "sparse/0"):
     # print(matched_indices_cb) 
 
 matched_indices_sfm = match_sfm_camera_poses(cb, sparse_path = "sparse/0")
+sfm_translations_matched = np.array([sfm_translations[:][idx] for idx in matched_indices_sfm])
+sfm_translations_matched = sfm_translations_matched[:, :, 0].T # turn into 3xN
 
+sfm_rotations_matched = np.array([sfm_rotations[:][:][idx] for idx in matched_indices_sfm])
+sfm_rotations_matched = sfm_rotations_matched.transpose(1, 2, 0) # turn into 3x3xN
 
 # Plot unscaled SFM with just the cmaeras matched to checkerboard cameras 
 def plot_pointcloud_matched(sparse_path, store_path="0", camera_scale=0.1, matched_indices=None):
@@ -253,4 +259,26 @@ def plot_pointcloud_matched(sparse_path, store_path="0", camera_scale=0.1, match
     print(f"Visualizing {len(matched_indices)} cameras and {len(pcd.points)} points")
     o3d.visualization.draw_geometries(geometries)
 
-plot_pointcloud_matched("sparse", store_path="0", camera_scale=0.1, matched_indices=matched_indices_sfm)
+# plot_pointcloud_matched("sparse", store_path="0", camera_scale=0.1, matched_indices=matched_indices_sfm)
+
+
+# Construct paths
+store_name = os.path.join(sparse_path, '0')
+file_path = os.path.join(store_name, "points.ply")
+
+# Load point cloud
+if not os.path.exists(file_path):
+    raise FileNotFoundError(f"points.ply not found at {file_path}")
+pcd = o3d.io.read_point_cloud(file_path)
+
+# Match pointclouds using camera poses 
+from point_cloud_matcher import PointCloudMatcher 
+
+pc_matcher = PointCloudMatcher() 
+pc_matcher.matchFromPoses( sfm_translations_matched, checker_translations )
+
+pc_matcher._s = 1
+
+pc_matcher.transformPointClouds( pcd )
+pc_matcher.transformCameraPoses( sfm_translations_matched, sfm_rotations_matched, checker_translations, checker_rotations)
+pc_matcher.plotPointClouds()
