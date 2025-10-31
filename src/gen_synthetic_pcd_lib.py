@@ -525,10 +525,84 @@ def generate_test_pcds_sat():
 #     }
 
 
+# MOST RECENT
+# def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
+#     """
+#     Load SfM point cloud, scale it to roughly match the reference cloud size, 
+#     and visualize both clouds in their original frames.
+
+#     Plots:
+#         1. Point clouds only
+#         2. Point clouds with oriented bounding boxes (OBBs)
+
+#     Args:
+#         ref_pcd: Open3D PointCloud object (reference CAD or test cloud)
+#         sfm_points_path: path to SfM-generated point cloud (.ply)
+
+#     Returns:
+#         dict: containing reference PCD, scaled SfM PCD, and dummy transform_gt
+#     """
+#     import open3d as o3d
+#     import numpy as np
+#     import os
+
+#     # --- Load SfM cloud ---
+#     if not os.path.exists(sfm_points_path):
+#         raise FileNotFoundError(f"SfM point cloud not found at: {sfm_points_path}")
+#     sfm_pcd = o3d.io.read_point_cloud(sfm_points_path)
+#     if len(sfm_pcd.points) == 0:
+#         raise ValueError(f"Loaded SfM point cloud from '{sfm_points_path}' is empty.")
+
+#     # --- Compute OBBs ---
+#     ref_obb = ref_pcd.get_oriented_bounding_box()
+#     sfm_obb = sfm_pcd.get_oriented_bounding_box()
+
+#     # --- Scale SfM cloud to match reference size ---
+#     scale_factor = np.linalg.norm(ref_obb.extent) / np.linalg.norm(sfm_obb.extent)
+#     sfm_center = sfm_obb.center
+#     # Translate to origin, scale, then put back in original frame
+#     sfm_pcd.translate(-sfm_center)
+#     sfm_pcd.scale(scale_factor, center=(0, 0, 0))
+#     sfm_pcd.translate(sfm_center)  # keep in original SfM position
+
+#     print(f"[INFO] Scaled SfM cloud by factor {scale_factor:.4f} using OBB-based scaling.")
+
+#     # --- Plot 1: point clouds only ---
+#     ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
+#     o3d.visualization.draw_geometries(
+#         [ref_vis, sfm_pcd],
+#         window_name="Reference (green) vs SfM (original colors)",
+#         width=900, height=700
+#     )
+
+#     # --- Plot 2: point clouds with OBBs ---
+#     ref_obb_ls = o3d.geometry.LineSet.create_from_oriented_bounding_box(ref_obb)
+#     ref_obb_ls.paint_uniform_color([0, 1, 0])  # green wireframe
+
+#     sfm_obb_ls = o3d.geometry.LineSet.create_from_oriented_bounding_box(sfm_obb)
+#     # Scale OBB to match point cloud scaling
+#     sfm_obb_ls.scale(scale_factor, center=sfm_center)
+#     sfm_obb_ls.paint_uniform_color([1, 0, 0])  # red wireframe
+
+#     o3d.visualization.draw_geometries(
+#         [ref_vis, ref_obb_ls, sfm_pcd, sfm_obb_ls],
+#         window_name="Reference (green) vs SfM (original colors) + OBBs",
+#         width=900, height=700
+#     )
+
+#     # --- Dummy ground-truth transform ---
+#     transform_gt = np.eye(4)
+
+#     return {
+#         "ref_pcd": ref_pcd,
+#         "synthetic_pcd": sfm_pcd,
+#         "transform_gt": transform_gt
+#     }
+
 def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
     """
-    Load SfM point cloud, scale it to roughly match the reference cloud size, 
-    and visualize both clouds in their original frames.
+    Load SfM point cloud, scale it to roughly match the reference cloud size,
+    translate both clouds to the reference center, and visualize.
 
     Plots:
         1. Point clouds only
@@ -539,7 +613,7 @@ def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
         sfm_points_path: path to SfM-generated point cloud (.ply)
 
     Returns:
-        dict: containing reference PCD, scaled SfM PCD, and dummy transform_gt
+        dict: containing reference PCD, scaled & centered SfM PCD, and dummy transform_gt
     """
     import open3d as o3d
     import numpy as np
@@ -559,12 +633,14 @@ def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
     # --- Scale SfM cloud to match reference size ---
     scale_factor = np.linalg.norm(ref_obb.extent) / np.linalg.norm(sfm_obb.extent)
     sfm_center = sfm_obb.center
-    # Translate to origin, scale, then put back in original frame
     sfm_pcd.translate(-sfm_center)
     sfm_pcd.scale(scale_factor, center=(0, 0, 0))
-    sfm_pcd.translate(sfm_center)  # keep in original SfM position
 
-    print(f"[INFO] Scaled SfM cloud by factor {scale_factor:.4f} using OBB-based scaling.")
+    # --- Translate both clouds to reference center ---
+    ref_center = ref_obb.center
+    sfm_pcd.translate(ref_center)
+
+    print(f"[INFO] Scaled SfM cloud by factor {scale_factor:.4f} and moved to reference center.")
 
     # --- Plot 1: point clouds only ---
     ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
@@ -578,9 +654,11 @@ def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
     ref_obb_ls = o3d.geometry.LineSet.create_from_oriented_bounding_box(ref_obb)
     ref_obb_ls.paint_uniform_color([0, 1, 0])  # green wireframe
 
+    # Recompute OBB after scaling & translation
+    sfm_obb = sfm_pcd.get_oriented_bounding_box()
     sfm_obb_ls = o3d.geometry.LineSet.create_from_oriented_bounding_box(sfm_obb)
-    # Scale OBB to match point cloud scaling
-    sfm_obb_ls.scale(scale_factor, center=sfm_center)
+    sfm_obb_ls.paint_uniform_color([1, 0, 0])
+
     sfm_obb_ls.paint_uniform_color([1, 0, 0])  # red wireframe
 
     o3d.visualization.draw_geometries(
@@ -597,7 +675,6 @@ def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
         "synthetic_pcd": sfm_pcd,
         "transform_gt": transform_gt
     }
-
 
 
 
