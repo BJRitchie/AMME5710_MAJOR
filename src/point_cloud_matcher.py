@@ -1,12 +1,6 @@
-import pycolmap
 import numpy as np
-import cv2
-import os
-import shutil
 import open3d as o3d
 import matplotlib.pyplot as plt
-from plyfile import PlyData
-import copy
 
 
 class PointCloudMatcher: 
@@ -154,8 +148,8 @@ class PointCloudMatcher:
             cam_rots_t[:, :, i] = self._R @ R0
 
         # Store internally 
-        self._cam_centers0 = cam_centers0 
-        self._cam_rots0 = cam_rots0 
+        self._cam_centers0 = cam_centers_t 
+        self._cam_rots0 = cam_rots_t 
         self._cam_centers1 = cam_centers1 
         self._cam_rots1 = cam_rots1 
         

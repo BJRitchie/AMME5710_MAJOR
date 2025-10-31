@@ -5,7 +5,6 @@ import os
 import shutil
 import open3d as o3d
 import matplotlib.pyplot as plt
-from plyfile import PlyData
 import copy
 
 class StrcFromMotion: 
