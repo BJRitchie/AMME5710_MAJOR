@@ -98,28 +98,38 @@ class PointCloudMatcher:
 
         return R, t.flatten(), s, T
 
-    def transformPointClouds( self, pc0  ): 
+    def transformPointClouds( self, pc0, pc1  ): 
         """Transforms pointcloud 0 into the same frame of reference as pointcloud 1. 
 
         Args:
             pc0 (np.array): Pointcloud 0, shape (3xN)
+            pc1 (np.array): Target Pointcloud, shape (3xN)
+
         """
         assert (self._R.any() != None) and (self._t.any() != None), "Rotation and translation vectors are not defined. "
         
         # --- Input checks
-        pc0 = np.asarray(pc0.points).T
+        # pc0 = np.asarray(pc0)
 
         if pc0.shape != pc0.shape:
             raise ValueError("poses0 and poses1 must have the same shape")
         if pc0.shape[0] != 3:
             raise ValueError("Input arrays must be 3xN")
-
-        # Perform transformation 
-        pc0_t = self._s * (self._R @ pc0) + self._t.reshape(3,1)
         
+        N = pc0.shape[1]
+        pc0_t = np.empty_like(pc0)
+        
+        # Perform transformation 
+        # pc0_t = self._s * (self._R @ pc0) + self._t
+        
+        for i in range(N):
+            pnt = pc0[:, i]
+            pc0_t[:, i] = self._s * (self._R @ pnt) + self._t
+
         # Store 
         self._pc0 = pc0
-        self._pc1 = pc0_t 
+        self._pc1 = pc1
+        self._pc0_t = pc0_t 
 
         return pc0_t
     
@@ -166,7 +176,7 @@ class PointCloudMatcher:
             camera_scale (float): Scale of camera coordinate frames and frustums.
             show_frustums (bool): Whether to draw simple camera frustums.
         """
-        assert self._pc0 is not None and self._pc1 is not None, "Pointclouds are not defined."
+        assert self._pc0 is not None and self._pc0_t is not None, "Pointclouds are not defined."
         assert hasattr(self, "_cam_centers0") and hasattr(self, "_cam_centers1"), "Camera poses not defined."
 
         geometries = []
@@ -174,7 +184,7 @@ class PointCloudMatcher:
         # --- Convert arrays to Open3D point clouds ---
         pc0_o3d = o3d.geometry.PointCloud()
         pc1_o3d = o3d.geometry.PointCloud()
-        pc0_o3d.points = o3d.utility.Vector3dVector(self._pc0.T)
+        pc0_o3d.points = o3d.utility.Vector3dVector(self._pc0_t.T)
         pc1_o3d.points = o3d.utility.Vector3dVector(self._pc1.T)
         pc0_o3d.paint_uniform_color([1.0, 0.0, 0.0])  # red = transformed (frame 0)
         pc1_o3d.paint_uniform_color([0.0, 0.7, 1.0])  # cyan = reference (frame 1)

@@ -138,6 +138,17 @@ print("Loaded saved SfM pipeline and checkerboard data")
 
 # plot_in_checkerboard_frame(cb)
 
+# Construct paths
+store_name = os.path.join(sparse_path, '0')
+file_path = os.path.join(store_name, "points.ply")
+
+# Load point cloud
+if not os.path.exists(file_path):
+    raise FileNotFoundError(f"points.ply not found at {file_path}")
+pcd = o3d.io.read_point_cloud(file_path) # Output of SFM 
+
+# SFM points 
+sfm_pcd = np.asarray(pcd.points).T 
 
 # Get SFM camera poses 
 sfm_rotations, sfm_translations = sfm_pipeline.get_poses()
@@ -149,19 +160,19 @@ sfm_rotations = np.array(sfm_rotations).transpose(1, 2, 0)
 
 # Apply a synthetic translation and rotation 
 # Rotation about X axis
-roll = np.deg2rad(10)
+roll = np.deg2rad(45)
 Rx = np.array([ [1, 0, 0], 
                 [0, np.cos(roll), -np.sin(roll)], 
                 [0, np.sin(roll), np.cos(roll)] ])
 
 # Rotation about Y axis
-pitch = np.deg2rad(5)    
+pitch = np.deg2rad(72)    
 Ry = np.array([ [np.cos(pitch), 0, np.sin(pitch)], 
                 [0, 1, 0], 
                 [-np.sin(pitch), 0, np.cos(pitch)] ])
 
 # Rotation about Z axis
-yaw = np.deg2rad(15)      
+yaw = np.deg2rad(132)      
 Rz = np.array([ [np.cos(yaw), -np.sin(yaw), 0], 
                 [np.sin(yaw), np.cos(yaw), 0], 
                 [0, 0, 1 ] ]) 
@@ -172,9 +183,26 @@ t_true = np.empty((3,1))
 t_true[:,0] = [5, 10, 15]
 
 c0 = sfm_translations
-R0 = sfm_rotations
-synth_translations = s_true * (R_true @ c0) + t_true 
-synth_rotations = R_true @ R0 
+r0 = sfm_rotations
+
+
+N = c0.shape[1]
+synth_translations = np.empty_like(c0)
+synth_rotations = np.empty_like(sfm_rotations)
+synth_pcd = np.empty_like(sfm_pcd) 
+
+for i in range(N):
+    
+    # Camera poses 
+    cam_pnt = c0[:, i]
+    cam_rot = r0[:, :, i]
+    synth_translations[:, i] = s_true * (R_true @ cam_pnt) + t_true.T
+    synth_rotations[:, :, i] = R_true @ cam_rot
+    
+for i in range( sfm_pcd.shape[1] ):
+    # Pointcloud 
+    sfm_pnt = sfm_pcd[:, i] 
+    synth_pcd[:, i] = s_true * (R_true @ sfm_pnt) + t_true.T 
 
 print("====== TRUE ======") 
 print("R_true: ") 
@@ -304,20 +332,12 @@ print(s_true)
 # plot_pointcloud_matched("sparse", store_path="0", camera_scale=0.1, matched_indices=matched_indices_sfm)
 
 
-# Construct paths
-store_name = os.path.join(sparse_path, '0')
-file_path = os.path.join(store_name, "points.ply")
-
-# Load point cloud
-if not os.path.exists(file_path):
-    raise FileNotFoundError(f"points.ply not found at {file_path}")
-pcd = o3d.io.read_point_cloud(file_path)
 
 # Match pointclouds using camera poses 
 from point_cloud_matcher import PointCloudMatcher 
 
 pc_matcher = PointCloudMatcher() 
-R, t, s, T = pc_matcher.matchFromPoses(sfm_translations, synth_translations)
+R, t, s, T = pc_matcher.matchFromPoses( sfm_translations, synth_translations )
 
 print("\n====== Umeyama ======") 
 print("R: ") 
@@ -327,59 +347,63 @@ print(t)
 print("\ns: ") 
 print(s)
 
-pc_matcher._s = s
-pc_matcher.transformPointClouds( pcd )
+# pc_matcher._s = 1.0
+# pc_matcher._t = t
+# pc_matcher._R = np.eye(3)#R 
+# pc_matcher._T = T 
+
+pc_matcher.transformPointClouds( sfm_pcd, synth_pcd )
 pc_matcher.transformCameraPoses( sfm_translations, sfm_rotations, synth_translations, synth_rotations )
 pc_matcher.plotPointClouds()
 
 
-# ------ BUNDLE ADJUSTMENT METHOD ------ # 
+# # ------ BUNDLE ADJUSTMENT METHOD ------ # 
 
-from scipy.optimize import least_squares
-from scipy.spatial.transform import Rotation as Rsc
+# from scipy.optimize import least_squares
+# from scipy.spatial.transform import Rotation as Rsc
 
-def residual(params, poses0, poses1):
-    # params = [rx, ry, rz, tx, ty, tz, s]
-    rvec = params[:3]
-    t = params[3:6]
-    s = params[6]
-    R = Rsc.from_rotvec(rvec).as_matrix()
-    err = s * (R @ poses0) + t[:, None] - poses1
-    return err.flatten()
+# def residual(params, poses0, poses1):
+#     # params = [rx, ry, rz, tx, ty, tz, s]
+#     rvec = params[:3]
+#     t = params[3:6]
+#     s = params[6]
+#     R = Rsc.from_rotvec(rvec).as_matrix()
+#     err = s * (R @ poses0) + t[:, None] - poses1
+#     return err.flatten()
 
-def nonlinear_alignment(poses0, poses1):
-    params0 = np.zeros(7)  # initial guess: no rotation, no translation, scale=1
-    params0[6] = 1.0
-    res = least_squares(residual, params0, args=(poses0, poses1))
-    rvec, t, s = res.x[:3], res.x[3:6], res.x[6]
-    R = Rsc.from_rotvec(rvec).as_matrix()
-    return R, t, s
+# def nonlinear_alignment(poses0, poses1):
+#     params0 = np.zeros(7)  # initial guess: no rotation, no translation, scale=1
+#     params0[6] = 1.0
+#     res = least_squares(residual, params0, args=(poses0, poses1))
+#     rvec, t, s = res.x[:3], res.x[3:6], res.x[6]
+#     R = Rsc.from_rotvec(rvec).as_matrix()
+#     return R, t, s
 
-R, t, s = nonlinear_alignment( sfm_translations, synth_translations ) 
+# R, t, s = nonlinear_alignment( sfm_translations, synth_translations ) 
 
-T = np.eye(4)
-T[:3, :3] = s * R
-T[:3, 3] = t.flatten()
+# T = np.eye(4)
+# T[:3, :3] = s * R
+# T[:3, 3] = t.flatten()
 
-print("\n====== Bundle Adjustment ======") 
-print("R: ") 
-print(R)
-print("\nt: ") 
-print(t)
-print("\ns: ") 
-print(s)
+# print("\n====== Bundle Adjustment ======") 
+# print("R: ") 
+# print(R)
+# print("\nt: ") 
+# print(t)
+# print("\ns: ") 
+# print(s)
 
-pc_matcher2 = PointCloudMatcher() 
+# pc_matcher2 = PointCloudMatcher() 
 
-pc_matcher2._s = s
-pc_matcher2._t = t
-pc_matcher2._R = R
-pc_matcher2._T = T
-pc_matcher2._poses0 = sfm_translations
-pc_matcher2._poses1 = synth_translations
+# pc_matcher2._s = 1.0
+# pc_matcher2._t = t
+# pc_matcher2._R = np.eye(3)#R 
+# pc_matcher2._T = T 
+# pc_matcher2._poses0 = synth_translations 
+# pc_matcher2._poses1 = sfm_translations 
 
-pc_matcher2.transformPointClouds( pcd )
-pc_matcher2.transformCameraPoses( sfm_translations, sfm_rotations, synth_translations, synth_rotations)
-pc_matcher2.plotPointClouds()
+# pc_matcher2.transformPointClouds( pcd )
+# pc_matcher2.transformCameraPoses( sfm_translations, sfm_rotations, synth_translations, synth_rotations)
+# pc_matcher2.plotPointClouds()
 
 
