@@ -20,60 +20,50 @@ sfm_pipeline.plot_pointcloud()
 # sfm_pipeline.stat_clean_pointcloud()
 
 
-def clean_pointcloud(sparse_path = "sparse", store_path="0", nb_points=50, radius=10.0):
-    # Read the point cloud
-    path = os.path.join(sparse_path, store_path, "points.ply")
-    pcd = o3d.io.read_point_cloud(path)
 
+def clean_pointcloud(pcd, nb_points=50, radius=10.0):
+    """
+    Remove radius-based outliers from a point cloud.
+
+    Parameters:
+        pcd (o3d.geometry.PointCloud): Input point cloud.
+        nb_points (int): Minimum number of neighbors within the radius.
+        radius (float): Radius around each point to check for neighbors.
+
+    Returns:
+        o3d.geometry.PointCloud: Cleaned point cloud (inliers only).
+    """
     # Apply radius outlier removal
-    cl, ind = pcd.remove_radius_outlier(nb_points=nb_points, radius=radius)
+    _, ind = pcd.remove_radius_outlier(nb_points=nb_points, radius=radius)
 
     # Extract the inlier point cloud
     denoised_pcd = pcd.select_by_index(ind)
 
-    # Create new output filename
-    base, ext = os.path.splitext(path)
-    new_path = base + "_cleaned" + ext  # e.g. points_cleaned.ply
-
-    # Save cleaned cloud to new file
-    o3d.io.write_point_cloud(new_path, denoised_pcd, write_ascii=False, compressed=False)
-
-    print(f"Cleaned point cloud saved to: {new_path}")
-    return
+    print(f"Radius cleaning: {len(pcd.points)} → {len(denoised_pcd.points)} points retained.")
+    return denoised_pcd
 
 
-def stat_clean_pointcloud(sparse_path="sparse", store_path="0", nb_neighbors=20, std_ratio=2.0):
+def stat_clean_pointcloud(pcd, nb_neighbors=20, std_ratio=2.0):
     """
-    Clean the point cloud using Statistical Outlier Removal (SOR).
-    
+    Clean a point cloud using Statistical Outlier Removal (SOR).
+
     Parameters:
-        sparse_path (str): Base folder containing the sparse reconstruction.
-        store_path (str): Relative folder inside sparse path (e.g., "0").
+        pcd (o3d.geometry.PointCloud): Input point cloud.
         nb_neighbors (int): Number of neighbors to analyze for each point.
         std_ratio (float): Standard deviation multiplier — lower removes more points.
+
+    Returns:
+        o3d.geometry.PointCloud: Cleaned point cloud (inliers only).
     """
-
-    # Load point cloud
-    path = os.path.join(sparse_path, store_path, "points.ply")
-    pcd = o3d.io.read_point_cloud(path)
-
     # Apply Statistical Outlier Removal
-    cl, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
+    _, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
 
     # Keep only inliers
     denoised_pcd = pcd.select_by_index(ind)
 
-    # Create new output filename
-    base, ext = os.path.splitext(path)
-    new_path = base + "_cleaned" + ext  # e.g. points_cleaned.ply
-
-    # Save cleaned cloud to new file
-    o3d.io.write_point_cloud(new_path, denoised_pcd, write_ascii=False, compressed=False)
-
-    print(f"Cleaned point cloud saved to: {new_path}")
-    print(f"Original points: {len(pcd.points)}, after cleaning: {len(denoised_pcd.points)}")
-
+    print(f"Statistical cleaning: {len(pcd.points)} → {len(denoised_pcd.points)} points retained.")
     return denoised_pcd
+
 
 
 def plot_pointcloud(pcd_name, sparse_path = "sparse", store_path="0", camera_scale=0.1):     
@@ -164,10 +154,35 @@ def plot_pointcloud(pcd_name, sparse_path = "sparse", store_path="0", camera_sca
     return    
 
 
-print("\nRadial Cleaned Point Cloud")
-clean_pointcloud(nb_points = 200, radius = 0.5)
-plot_pointcloud(pcd_name = "points_cleaned.ply", sparse_path = "sparse", store_path="0", camera_scale=0.1)
+pcd = o3d.io.read_point_cloud("sparse/0/points.ply")
 
-print("\Stat Cleaned Point Cloud")
-stat_clean_pointcloud()
-plot_pointcloud(pcd_name = "points_cleaned.ply", sparse_path = "sparse", store_path="0", camera_scale=0.1)
+# # Statistical cleaning
+# # pcd = stat_clean_pointcloud(pcd, nb_neighbors=100, std_ratio=2.0)
+
+# # pcd = stat_clean_pointcloud(pcd, nb_neighbors=50, std_ratio=1.0)
+
+# # Radius cleaning
+# pcd = clean_pointcloud(pcd, nb_points=30, radius=5.0)
+# pcd = clean_pointcloud(pcd, nb_points=100, radius=5.0)
+
+# # Save final result
+# o3d.io.write_point_cloud("sparse/0/points_cleaned.ply", pcd)
+
+
+# plot_pointcloud(pcd_name = "points_cleaned.ply")
+
+## INSPIRED BY OPENING/CLOSING (but no adding points back in)
+
+# Remove far statistical outliers
+pcd = stat_clean_pointcloud(pcd, nb_neighbors=30, std_ratio=1.0)
+
+# Remove isolated points - not actually doing anything in this 
+pcd = clean_pointcloud(pcd, nb_points=30, radius=5.0)
+
+# Smooth boundaries (mild statistical clean)
+pcd = stat_clean_pointcloud(pcd, nb_neighbors=50, std_ratio=1.3)
+
+
+o3d.io.write_point_cloud("sparse/0/points_cleaned.ply", pcd)
+plot_pointcloud(pcd_name="points_cleaned.ply")
+
