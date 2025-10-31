@@ -9,7 +9,9 @@ import glob
 class Checkerboard: 
     def __init__(self):
         
-        self._ims = []  
+        self._ims = [] 
+        self._image_names = []
+        self._checker_image_names = [] 
         
         pass 
     
@@ -18,7 +20,6 @@ class Checkerboard:
         # Check it is a valid path 
         assert os.path.exists(im_path), f"{im_path} doesn't exist" 
         
-
         # Match common image file extensions
         extensions = ('*.png', '*.jpg', '*.jpeg', '*.bmp', '*.tiff', '*.pgm')
         
@@ -33,8 +34,9 @@ class Checkerboard:
                 
             if img is not None:  # Ensure it read correctly
                 self._ims.append(img) 
+                self._image_names.append(file)
         
-        return  
+        return
     
     """Determines the intrinsic parameters of the camera using the checkerboard photos
     
@@ -75,7 +77,7 @@ class Checkerboard:
         corr_3d_points = [] 
 
         # Iterate over all the stored images 
-        for im in self._ims: 
+        for i, im in enumerate(self._ims): 
             H, W = im.shape 
             
             # Detect and refine  
@@ -85,6 +87,8 @@ class Checkerboard:
                 continue 
             corners2 = cv2.cornerSubPix(im, corners, window_size, (-1,-1), criteria)
             checker_board_coords.append(corners2) 
+
+            self._checker_image_names.append(self._image_names[i])  # <-- store filename for detected image
 
             # Build numpy array containing (x,y,z) coordinates of corners, relative to board itself
             pattern_points = np.zeros((np.prod(grid_size), 3), np.float32)
@@ -179,6 +183,30 @@ class Checkerboard:
             height=768,
             mesh_show_back_face=True
         )
+
+    def get_camera_poses(self):
+        """
+        Returns the camera poses in the checkerboard/world frame.
+
+        Returns:
+            camera_rotations (list of np.ndarray): Each 3x3 rotation matrix of the camera.
+            camera_positions (list of np.ndarray): Each 3x1 camera position in the checkerboard frame.
+        """
+        camera_rotations = []
+        camera_positions = []
+
+        for rvec, tvec in zip(self._rvecs, self._tvecs):
+            R_board, _ = cv2.Rodrigues(rvec)   # checkerboard rotation in camera frame
+            t_board = np.asarray(tvec).reshape(3)  # checkerboard translation in camera frame
+
+            # Invert transformation to get camera in checkerboard/world frame
+            R_cam = R_board.T
+            C_cam = -R_board.T @ t_board
+
+            camera_rotations.append(R_cam)
+            camera_positions.append(C_cam.reshape(3, 1))
+
+        return camera_rotations, camera_positions
 
 
 if __name__ == "__main__": 

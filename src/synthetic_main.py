@@ -2,10 +2,16 @@ import pycolmap
  
 import sfm_pipeline_lib as pipeline 
 import gen_synthetic_pcd_lib as gen
+from file_reading_lib import gen_images_from_vid 
+import checkerboard_lib as checkerboard
+
 
 ## GENERATE SFM CLASS ##
 # Convert the video into images 
-store_path="images/batmo"
+store_path= "images/checker_nasa_box"
+vid_path = 'images/checker_nasa_box.mp4'
+gen_images_from_vid( vid_path, store_path ) 
+
 
 # Storage files 
 im_path = store_path
@@ -35,7 +41,7 @@ sfm_pipeline = pipeline.StrcFromMotion (
 # TODO Think these are also computing a target point cloud and gt, but then doing that again the function below - what if GT doesn't match??
 # TODO Delete synthetic test data function and add in from here? Or make it consistent 
 # Best working cubesat
-ref_pcd = gen.generate_ppf_friendly_cubesat(num_points=20000, noise_std=0.001)
+# ref_pcd = gen.generate_ppf_friendly_cubesat(num_points=20000, noise_std=0.001)
 
 
 # Other shapes: (mostly didn't work well) - currently these autogenerate their own target perturbed point clouds, but ignore it is overwritten by function below (haven't bothered to fix in this functions since we aren't using them)
@@ -46,8 +52,27 @@ ref_pcd = gen.generate_ppf_friendly_cubesat(num_points=20000, noise_std=0.001)
 # ref_pcd, _, _ = gen.generate_complex_satellite_pcd()
 # ref_pcd, _, _ = gen.generate_synthetic_satellite()
 
-## GENERATE TEST SYNTHETIC POINT CLOUD ##
-test_data = sfm_pipeline.generate_synthetic_test_data_from_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05]) #  , noise_level = 0.001)
+ref_pcd = gen.generate_test_pcds_sat()
+# test_data = gen.generate_test_pcds_plane()
+
+# ## GENERATE TEST SYNTHETIC POINT CLOUD ##
+# test_data = sfm_pipeline.generate_synthetic_test_data_from_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05]) #  , noise_level = 0.001)
+
+
+# ## OR INPUT SFM POINT CLOUD
+sfm_pipeline.make_reference_ply()
+sfm_pipeline.plot_reference_model()
+
+sfm_pipeline.resize_ims( store_path, 1200, 1 )
+sfm_pipeline.prep_pointcloud() 
+sfm_pipeline.make_pointcloud()
+# sfm_pipeline.clean_pointcloud()
+# sfm_pipeline.clean_pointcloud(nb_points = 80, radius = 0.25) 
+# sfm_pipeline.stat_clean_pointcloud()
+sfm_pipeline.plot_pointcloud()
+
+
+test_data = gen.generate_data_from_sfm(ref_pcd)
 
 # Verify PPF
 success = sfm_pipeline.verify_ppf_with_provided_pcds(

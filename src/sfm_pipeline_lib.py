@@ -1380,3 +1380,54 @@ class StrcFromMotion:
         else:
             print(f"❌ VERIFICATION FAILED")
         return success
+
+
+
+    def save_registered_images(self, store_path="0", output_folder="registered_images"):
+        """
+        Clear folder then copy only the images that were used in the SfM reconstruction
+        to a new folder for downstream processing (e.g., checkerboard detection).
+        """
+        rec_path = os.path.join(self._sparse_path, store_path)
+        rec = pycolmap.Reconstruction(rec_path)
+
+        # Clear existing folder if it exists
+        if os.path.exists(output_folder):
+            shutil.rmtree(output_folder)
+        os.makedirs(output_folder)
+
+        # Copy registered images
+        for image_id, image in rec.images.items():
+            src_path = os.path.join(self._image_path, image.name)
+            dst_path = os.path.join(output_folder, image.name)
+            if os.path.exists(src_path):
+                shutil.copy(src_path, dst_path)
+
+        print(f"Saved {len(rec.images)} registered images to '{output_folder}' (folder cleared before copying).")
+
+
+    def get_poses(self, store_path="0"):
+        """
+        Extract the camera poses (rotations and translations) from the SfM reconstruction.
+        Returns:
+            rotations: list of 3x3 numpy arrays (world to camera rotations)
+            translations: list of 3x1 numpy arrays (camera centers in world coordinates)
+        """
+        rec_path = os.path.join(self._sparse_path, store_path)
+        rec = pycolmap.Reconstruction(rec_path)
+
+        rotations = []
+        translations = []
+
+        # Sort images by name for consistent ordering
+        image_items = sorted(rec.images.items(), key=lambda x: x[1].name)
+
+        for _, image in image_items:
+            cam_from_world = image.cam_from_world()
+            R = cam_from_world.rotation.matrix()       # 3x3 rotation
+            t = image.projection_center().reshape(3,1) # 3x1 translation (camera center)
+            rotations.append(R)
+            translations.append(t)
+
+        print(f"Extracted {len(rotations)} camera poses from SfM.")
+        return rotations, translations

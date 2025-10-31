@@ -323,3 +323,229 @@ def generate_ppf_friendly_cubesat(num_points=20000, noise_std=0.001):
                                       width=900, height=700)
     
     return ref_pcd # , target_pcd, T_gt
+
+
+
+def generate_test_pcds_sat():
+    # Create a box of dimensions 3cm x 2cm x 1cm (converted to meters)
+    width = 0.195 # 0.03   # 3 cm
+    height = 0.105 # 0.02  # 2 cm
+    depth = 0.082 # 0.01   # 1 cm
+    mesh = o3d.geometry.TriangleMesh.create_box(width=width, height=height, depth=depth)
+    mesh.compute_vertex_normals()
+
+    # Sample points from the mesh
+    ref_pcd = mesh.sample_points_poisson_disk(3000)
+
+    # Define a known small transform (rotation + translation)
+    angle = np.deg2rad(15)
+    R = ref_pcd.get_rotation_matrix_from_xyz((angle, angle / 2, angle / 3))
+    t = np.array([0.005, 0.003, 0.002])  # small translation (5 mm, 3 mm, 2 mm)
+    transform_gt = np.eye(4)
+    transform_gt[:3, :3] = R
+    transform_gt[:3, 3] = t
+
+    # Apply transform to get target point cloud
+    target_pcd = copy.deepcopy(ref_pcd).transform(transform_gt)
+
+    # Add small noise to make the point sets non-identical
+    target_pts = np.asarray(target_pcd.points)
+    target_pts += np.random.normal(scale=0.0001, size=target_pts.shape)  # 0.1 mm noise
+    target_pcd.points = o3d.utility.Vector3dVector(target_pts)
+
+    # Color and visualize both
+    ref_vis = copy.deepcopy(ref_pcd)
+    ref_vis.paint_uniform_color([0.1, 0.8, 0.1])   # green (reference)
+
+    target_vis = copy.deepcopy(target_pcd)
+    target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # red (transformed)
+
+    o3d.visualization.draw_geometries(
+        [ref_vis, target_vis],
+        window_name="3 cm x 2 cm x 1 cm Box: Reference (green) vs Transformed (red)",
+        width=900,
+        height=700,
+        point_show_normal=False
+    )
+
+    return ref_pcd # , target_pcd, transform_gt
+
+
+
+# def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
+#     """
+#     Load target point cloud from SfM reconstruction and use the input reference point cloud
+#     as test data.
+
+#     Args:
+#         ref_pcd: Open3D PointCloud object (reference/test data)
+#         sfm_points_path: path to SfM-generated point cloud (.ply)
+
+#     Returns:
+#         dict: containing reference PCD, target PCD (from SfM), and dummy ground-truth transform
+#     """
+#     import open3d as o3d
+#     import numpy as np
+#     import os
+
+#     # --- Verify file existence ---
+#     if not os.path.exists(sfm_points_path):
+#         raise FileNotFoundError(f"SfM point cloud not found at: {sfm_points_path}")
+
+#     # --- Load SfM-generated point cloud ---
+#     target_pcd = o3d.io.read_point_cloud(sfm_points_path)
+#     if len(target_pcd.points) == 0:
+#         raise ValueError(f"Loaded SfM point cloud from '{sfm_points_path}' is empty.")
+    
+
+#     # TODO Put into same scale
+
+
+#     # --- Dummy ground truth transform (unknown alignment) ---
+#     transform_gt = np.eye(4)
+
+#     # --- Optional: visualize for sanity check ---
+#     ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])   # green
+#     target_vis = target_pcd.paint_uniform_color([0.8, 0.1, 0.1])  # red
+#     o3d.visualization.draw_geometries(
+#         [ref_vis, target_vis],
+#         window_name="Reference (green) vs SfM Target (red)",
+#         width=900,
+#         height=700
+#     )
+
+#     return {
+#         "ref_pcd": ref_pcd,
+#         "synthetic_pcd": target_pcd,
+#         "transform_gt": transform_gt  # dummy
+#     }
+
+
+def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
+    """
+    Load target point cloud from SfM reconstruction, scale it to match the reference point cloud,
+    and package the results into a dictionary.
+
+    Args:
+        ref_pcd: Open3D PointCloud object (reference/test data)
+        sfm_points_path: path to SfM-generated point cloud (.ply)
+
+    Returns:
+        dict: containing reference PCD, scaled SfM PCD, and dummy ground-truth transform
+    """
+    import open3d as o3d
+    import numpy as np
+    import os
+
+    # --- Verify file existence ---
+    if not os.path.exists(sfm_points_path):
+        raise FileNotFoundError(f"SfM point cloud not found at: {sfm_points_path}")
+
+    # --- Load SfM-generated point cloud ---
+    target_pcd = o3d.io.read_point_cloud(sfm_points_path)
+    if len(target_pcd.points) == 0:
+        raise ValueError(f"Loaded SfM point cloud from '{sfm_points_path}' is empty.")
+
+    # --- Scale normalization ---
+    # Compute bounding box diagonals for both clouds
+    ref_bbox = ref_pcd.get_axis_aligned_bounding_box()
+    target_bbox = target_pcd.get_axis_aligned_bounding_box()
+
+    ref_diag = np.linalg.norm(np.array(ref_bbox.get_max_bound()) - np.array(ref_bbox.get_min_bound()))
+    target_diag = np.linalg.norm(np.array(target_bbox.get_max_bound()) - np.array(target_bbox.get_min_bound()))
+
+    if target_diag == 0:
+        raise ValueError("SfM point cloud has zero-size bounding box (check data).")
+
+    scale_factor = ref_diag / target_diag
+
+    # Center both before scaling to avoid offset scaling artifacts
+    target_center = target_bbox.get_center()
+    target_pcd.translate(-target_center)
+    target_pcd.scale(scale_factor, center=(0, 0, 0))
+
+    # (Optional) re-center to match reference center
+    ref_center = ref_bbox.get_center()
+    target_pcd.translate(ref_center)
+
+    print(f"[INFO] Scaled SfM point cloud by factor {scale_factor:.4f} to match reference scale.")
+
+    # --- Dummy ground truth transform (unknown alignment) ---
+    transform_gt = np.eye(4)
+
+    # --- Optional: visualize for sanity check ---
+    ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])   # green
+    target_vis = target_pcd.paint_uniform_color([0.8, 0.1, 0.1])  # red
+    o3d.visualization.draw_geometries(
+        [ref_vis, target_vis],
+        window_name="Reference (green) vs Scaled SfM Target (red)",
+        width=900,
+        height=700
+    )
+
+    return {
+        "ref_pcd": ref_pcd,
+        "synthetic_pcd": target_pcd,
+        "transform_gt": transform_gt  # dummy
+    }
+
+
+
+
+def generate_test_pcds_plane():
+    """
+    Generate test data where the reference is a 3x2x1 cm box,
+    and the synthetic (target) is a rotated & translated plane.
+    """
+
+    # --- Reference: 3cm x 2cm x 1cm box (in meters) ---
+    width = 0.03   # 3 cm
+    height = 0.02  # 2 cm
+    depth = 0.01   # 1 cm
+    mesh_box = o3d.geometry.TriangleMesh.create_box(width=width, height=height, depth=depth)
+    mesh_box.compute_vertex_normals()
+    ref_pcd = mesh_box.sample_points_poisson_disk(3000)
+
+    # --- Target: flat plane (3cm x 2cm) ---
+    mesh_plane = o3d.geometry.TriangleMesh.create_box(width=width, height=height, depth=1e-4)
+    mesh_plane.compute_vertex_normals()
+    plane_pcd = mesh_plane.sample_points_poisson_disk(3000)
+
+    # --- Apply a small known rotation + translation to the plane ---
+    angle = np.deg2rad(15)
+    R = ref_pcd.get_rotation_matrix_from_xyz((angle, angle / 2, angle / 3))
+    t = np.array([0.005, 0.003, 0.002])  # translation: 5mm, 3mm, 2mm
+    transform_gt = np.eye(4)
+    transform_gt[:3, :3] = R
+    transform_gt[:3, 3] = t
+
+    target_pcd = copy.deepcopy(plane_pcd).transform(transform_gt)
+
+    # --- Add tiny noise for realism ---
+    target_pts = np.asarray(target_pcd.points)
+    target_pts += np.random.normal(scale=0.0001, size=target_pts.shape)  # 0.1 mm noise
+    target_pcd.points = o3d.utility.Vector3dVector(target_pts)
+
+    # --- Visualization (optional) ---
+    ref_vis = copy.deepcopy(ref_pcd)
+    ref_vis.paint_uniform_color([0.1, 0.8, 0.1])   # green = reference box
+
+    target_vis = copy.deepcopy(target_pcd)
+    target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # red = rotated plane
+
+    o3d.visualization.draw_geometries(
+        [ref_vis, target_vis],
+        window_name="Reference Box (green) vs Rotated Plane (red)",
+        width=900,
+        height=700,
+        point_show_normal=False
+    )
+
+    # --- Package into dictionary ---
+    test_data = {
+        "ref_pcd": ref_pcd,
+        "synthetic_pcd": target_pcd,
+        "transform_gt": transform_gt
+    }
+
+    return test_data
