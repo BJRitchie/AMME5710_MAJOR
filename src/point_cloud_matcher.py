@@ -25,7 +25,39 @@ class PointCloudMatcher:
         
         pass
     
-    def matchFromPoses( self, poses0, poses1 ): 
+    def matchFromPosesRANSAC( self, poses0, poses1, threshold=0.02, max_iter=1000, ransac_samples=5 ): 
+        
+        N = poses0.shape[1]
+        best_inliers = [] 
+
+        # Try fit using samples, check for quality of fit (RANSAC)
+            # Keep the best fit
+        for _ in range(max_iter):
+            # Random 3-point subset
+            idx = np.random.choice(N, ransac_samples, replace=False)
+            R, t, s, T = self.matchFromPosesUmeyama(poses0[:, idx], poses1[:, idx])
+
+            # Compute alignment error for all points
+            # transformed = s * np.einsum('ij,jk->ik', R, poses0) + t.reshape(3, 1) 
+            transformed = np.empty_like(poses0)
+            for i in range(N):
+                transformed[:, i] = s * (R @ poses0[:, i]) + t 
+                
+            errors = np.linalg.norm(transformed - poses1, axis=0)
+            inliers = np.where(errors < threshold)[0]
+
+            if len(inliers) > len(best_inliers):
+                best_inliers = inliers
+
+        # Refine using all inliers
+        if len(best_inliers) >= 3:
+            R, t, s, T = self.matchFromPosesUmeyama(poses0[:, best_inliers], poses1[:, best_inliers])
+        else:
+            R, t, s, T = self.matchFromPosesUmeyama(poses0, poses1)
+
+        return R, t, s, T, best_inliers 
+    
+    def matchFromPosesUmeyama( self, poses0, poses1 ): 
         """
         Solve for rotation, translation, and scale between two sets of 3D points.
 
@@ -66,36 +98,54 @@ class PointCloudMatcher:
         X0 = poses0 - mu0
         X1 = poses1 - mu1
 
-        # --- 4. Compute covariance matrix
+        # Compute covariance matrix
         Sigma = (X1 @ X0.T) / N
 
-        # --- 5. Compute SVD of covariance
+        # Compute SVD of covariance
         U, D, Vt = np.linalg.svd(Sigma)
+        
+        # Two possible rotations: proper (+1) and reflected (-1)
+        S_pos = np.eye(3)
+        S_neg = np.diag([1, 1, -1])
 
-        # --- 6. Compute rotation matrix
-        det_term = np.linalg.det(U @ Vt)
-        S = np.eye(3)
-        S[2, 2] = det_term  # ensure right-handed rotation
-        R = U @ S @ Vt
-
-        # --- 7. Compute scale factor (least-squares)
+        R_pos = U @ S_pos @ Vt
+        R_neg = U @ S_neg @ Vt
+        
+        # Compute scales
         var0 = np.sum(X0**2) / N
-        s = np.trace(np.diag(D) @ S) / var0
+        s_pos = np.trace(np.diag(D) @ S_pos) / var0
+        s_neg = np.trace(np.diag(D) @ S_neg) / var0
 
-        # --- 8. Compute translation
-        t = mu1 - s * R @ mu0
+        # Compute translations
+        t_pos = mu1 - s_pos * R_pos @ mu0
+        t_neg = mu1 - s_neg * R_neg @ mu0
 
-        # --- 9. Construct homogeneous transformation
+        # Compute total alignment error for both
+        pos_t = np.empty_like(poses0)
+        neg_t = np.empty_like(poses0)
+        for i in range(N):
+            pos_t[:, i] = s_pos * (R_pos @ poses0[:, i]) + t_pos[:, 0]
+            neg_t[:, i] = s_neg * (R_neg @ poses0[:, i]) + t_neg[:, 0]
+        err_pos = np.mean(np.linalg.norm(pos_t - poses1, axis=0))
+        err_neg = np.mean(np.linalg.norm(neg_t - poses1, axis=0))
+
+        # Choose the better one
+        if err_pos <= err_neg:
+            R, t, s = R_pos, t_pos, s_pos
+        else:
+            R, t, s = R_neg, t_neg, s_neg
+
+        # Build homogeneous matrix
         T = np.eye(4)
         T[:3, :3] = s * R
-        T[:3, 3] = t.flatten()
+        T[:3, 3] = t.flatten() 
 
         # Store 
         self._R = R 
         self._t = t.flatten() 
         self._T = T  
         self._s = s 
-
+        
         return R, t.flatten(), s, T
 
     def transformPointClouds( self, pc0, pc1  ): 
@@ -246,6 +296,11 @@ class PointCloudMatcher:
 
 # test
 if __name__ == "__main__": 
+    import pickle 
+    import os 
+    from rotation_mat import rotation_mat_degs, apply_transform
+    
+    # ------- BASIC TEST ------- # 
     poses0_ = np.array([
         [1.0, 2.0, 3.0, 4.0],
         [4.0, 5.0, 6.0, 7.0],
@@ -272,4 +327,76 @@ if __name__ == "__main__":
     # Verify
     pred_ = s_ * (R_ @ poses0_) + t_.reshape(3,1)
     print("\nResidual error:\n", poses1_ - pred_)
+
+    # ------- POINTCLOUD TEST ------- # 
+    # File names 
+    store_path= "images/checker_nasa_box"
+    vid_path = 'images/checker_nasa_box.mp4'
+    sfm_save_path = "images/checker_nasa_box_sfm"
+
+    # Storage files 
+    im_path = store_path
+    db_path = "database.db"
+    sparse_path = "sparse"
+    dense_path = "dense"
+    sat_model_path = "sat_model"
+
+    
+    # Load sfm class 
+    with open("sfm_pipeline.pkl", "rb") as f:
+        sfm_pipeline = pickle.load(f)
+
+    with open("checkerboard.pkl", "rb") as f:
+        cb = pickle.load(f)
+
+    print("Loaded saved SfM pipeline and checkerboard data")
+
+    # Construct paths
+    store_name = os.path.join(sparse_path, '0')
+    file_path = os.path.join(store_name, "points.ply")
+
+    # Load point cloud
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"points.ply not found at {file_path}")
+    pcd = o3d.io.read_point_cloud(file_path) # Output of SFM 
+
+    # SFM points 
+    sfm_pcd = np.asarray(pcd.points).T 
+
+    # Get SFM camera poses 
+    sfm_rotations, sfm_translations = sfm_pipeline.get_poses()
+    sfm_translations = np.array(sfm_translations)[:, :, 0].T 
+    sfm_rotations = np.array(sfm_rotations).transpose(1, 2, 0)
+
+    # Generate example transform 
+    s_true = 2
+    R_true = rotation_mat_degs(roll=45, pitch=72, yaw=132) 
+    t_true = np.empty((3,1))
+    t_true[:,0] = [5, 10, 15]
+    
+    synth_translations, synth_rotations = apply_transform(s_true, R_true, t_true, sfm_translations, sfm_rotations)
+    synth_pcd, _ = apply_transform(s_true, R_true, t_true, sfm_pcd, None) 
+
+    print("====== TRUE ======") 
+    print("R_true: ") 
+    print(R_true)
+    print("\nt_true: ") 
+    print(t_true)
+    print("\ns_true: ") 
+    print(s_true)
+
+    pc_matcher = PointCloudMatcher() 
+    R, t, s, T = pc_matcher.matchFromPoses( sfm_translations, synth_translations )
+
+    print("\n====== Umeyama ======") 
+    print("R: ") 
+    print(R)
+    print("\nt: ") 
+    print(t)
+    print("\ns: ") 
+    print(s)
+
+    pc_matcher.transformPointClouds( sfm_pcd, synth_pcd )
+    pc_matcher.transformCameraPoses( sfm_translations, sfm_rotations, synth_translations, synth_rotations )
+    pc_matcher.plotPointClouds()
 

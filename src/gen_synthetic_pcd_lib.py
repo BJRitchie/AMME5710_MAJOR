@@ -360,13 +360,13 @@ def generate_test_pcds_sat():
     target_vis = copy.deepcopy(target_pcd)
     target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # red (transformed)
 
-    o3d.visualization.draw_geometries(
-        [ref_vis, target_vis],
-        window_name="3 cm x 2 cm x 1 cm Box: Reference (green) vs Transformed (red)",
-        width=900,
-        height=700,
-        point_show_normal=False
-    )
+    # o3d.visualization.draw_geometries(
+    #     [ref_vis, target_vis],
+    #     window_name="3 cm x 2 cm x 1 cm Box: Reference (green) vs Transformed (red)",
+    #     width=900,
+    #     height=700,
+    #     point_show_normal=False
+    # )
 
     return ref_pcd # , target_pcd, transform_gt
 
