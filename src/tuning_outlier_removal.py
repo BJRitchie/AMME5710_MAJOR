@@ -186,3 +186,19 @@ pcd = stat_clean_pointcloud(pcd, nb_neighbors=50, std_ratio=1.3)
 o3d.io.write_point_cloud("sparse/0/points_cleaned.ply", pcd)
 plot_pointcloud(pcd_name="points_cleaned.ply")
 
+
+
+
+import gen_synthetic_pcd_lib as gen
+
+ref_pcd = gen.generate_test_pcds_sat()
+
+test_data = gen.generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points_cleaned.ply")
+
+# Verify PPF
+success = sfm_pipeline.verify_ppf_with_provided_pcds(
+    test_data["ref_pcd"],
+    test_data["synthetic_pcd"],
+    test_data["transform_gt"]
+)
+

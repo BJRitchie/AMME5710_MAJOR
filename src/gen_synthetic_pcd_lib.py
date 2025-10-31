@@ -372,6 +372,10 @@ def generate_test_pcds_sat():
 
 
 
+
+
+
+
 # def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
 #     """
 #     Load target point cloud from SfM reconstruction and use the input reference point cloud
@@ -421,73 +425,128 @@ def generate_test_pcds_sat():
 #     }
 
 
+# def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
+#     """
+#     Load target point cloud from SfM reconstruction, scale it to match the reference point cloud,
+#     and package the results into a dictionary.
+
+#     Args:
+#         ref_pcd: Open3D PointCloud object (reference/test data)
+#         sfm_points_path: path to SfM-generated point cloud (.ply)
+
+#     Returns:
+#         dict: containing reference PCD, scaled SfM PCD, and dummy ground-truth transform
+#     """
+#     import open3d as o3d
+#     import numpy as np
+#     import os
+
+#     # --- Verify file existence ---
+#     if not os.path.exists(sfm_points_path):
+#         raise FileNotFoundError(f"SfM point cloud not found at: {sfm_points_path}")
+
+#     # --- Load SfM-generated point cloud ---
+#     target_pcd = o3d.io.read_point_cloud(sfm_points_path)
+#     if len(target_pcd.points) == 0:
+#         raise ValueError(f"Loaded SfM point cloud from '{sfm_points_path}' is empty.")
+
+#     # --- Scale normalization ---
+#     # Compute bounding box diagonals for both clouds
+#     ref_bbox = ref_pcd.get_axis_aligned_bounding_box()
+#     target_bbox = target_pcd.get_axis_aligned_bounding_box()
+
+#     ref_diag = np.linalg.norm(np.array(ref_bbox.get_max_bound()) - np.array(ref_bbox.get_min_bound()))
+#     target_diag = np.linalg.norm(np.array(target_bbox.get_max_bound()) - np.array(target_bbox.get_min_bound()))
+
+#     if target_diag == 0:
+#         raise ValueError("SfM point cloud has zero-size bounding box (check data).")
+
+#     scale_factor = ref_diag / target_diag
+
+#     # Center both before scaling to avoid offset scaling artifacts
+#     target_center = target_bbox.get_center()
+#     target_pcd.translate(-target_center)
+#     target_pcd.scale(scale_factor, center=(0, 0, 0))
+
+#     # (Optional) re-center to match reference center
+#     ref_center = ref_bbox.get_center()
+#     target_pcd.translate(ref_center)
+
+#     print(f"[INFO] Scaled SfM point cloud by factor {scale_factor:.4f} to match reference scale.")
+
+#     # --- Dummy ground truth transform (unknown alignment) ---
+#     transform_gt = np.eye(4)
+
+#     # --- Optional: visualize for sanity check ---
+#     ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])   # green
+#     target_vis = target_pcd.paint_uniform_color([0.8, 0.1, 0.1])  # red
+#     o3d.visualization.draw_geometries(
+#         [ref_vis, target_vis],
+#         window_name="Reference (green) vs Scaled SfM Target (red)",
+#         width=900,
+#         height=700
+#     )
+
+#     return {
+#         "ref_pcd": ref_pcd,
+#         "synthetic_pcd": target_pcd,
+#         "transform_gt": transform_gt  # dummy
+#     }
+
+
+
 def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
-    """
-    Load target point cloud from SfM reconstruction, scale it to match the reference point cloud,
-    and package the results into a dictionary.
-
-    Args:
-        ref_pcd: Open3D PointCloud object (reference/test data)
-        sfm_points_path: path to SfM-generated point cloud (.ply)
-
-    Returns:
-        dict: containing reference PCD, scaled SfM PCD, and dummy ground-truth transform
-    """
     import open3d as o3d
     import numpy as np
     import os
 
-    # --- Verify file existence ---
     if not os.path.exists(sfm_points_path):
         raise FileNotFoundError(f"SfM point cloud not found at: {sfm_points_path}")
 
-    # --- Load SfM-generated point cloud ---
     target_pcd = o3d.io.read_point_cloud(sfm_points_path)
     if len(target_pcd.points) == 0:
         raise ValueError(f"Loaded SfM point cloud from '{sfm_points_path}' is empty.")
 
-    # --- Scale normalization ---
-    # Compute bounding box diagonals for both clouds
-    ref_bbox = ref_pcd.get_axis_aligned_bounding_box()
-    target_bbox = target_pcd.get_axis_aligned_bounding_box()
+    # --- Use Oriented Bounding Boxes (object’s own body frame) ---
+    ref_obb = ref_pcd.get_oriented_bounding_box()
+    target_obb = target_pcd.get_oriented_bounding_box()
 
-    ref_diag = np.linalg.norm(np.array(ref_bbox.get_max_bound()) - np.array(ref_bbox.get_min_bound()))
-    target_diag = np.linalg.norm(np.array(target_bbox.get_max_bound()) - np.array(target_bbox.get_min_bound()))
+    ref_diag = np.linalg.norm(ref_obb.extent)
+    target_diag = np.linalg.norm(target_obb.extent)
 
     if target_diag == 0:
         raise ValueError("SfM point cloud has zero-size bounding box (check data).")
 
     scale_factor = ref_diag / target_diag
 
-    # Center both before scaling to avoid offset scaling artifacts
-    target_center = target_bbox.get_center()
+    # --- Center and scale target ---
+    target_center = target_obb.center
     target_pcd.translate(-target_center)
     target_pcd.scale(scale_factor, center=(0, 0, 0))
 
-    # (Optional) re-center to match reference center
-    ref_center = ref_bbox.get_center()
+    # (Optional) move to roughly match reference center
+    ref_center = ref_obb.center
     target_pcd.translate(ref_center)
 
-    print(f"[INFO] Scaled SfM point cloud by factor {scale_factor:.4f} to match reference scale.")
+    print(f"[INFO] Scaled SfM point cloud by factor {scale_factor:.4f} using OBB-based scaling.")
 
-    # --- Dummy ground truth transform (unknown alignment) ---
+    # --- Dummy ground truth transform ---
     transform_gt = np.eye(4)
 
-    # --- Optional: visualize for sanity check ---
-    ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])   # green
-    target_vis = target_pcd.paint_uniform_color([0.8, 0.1, 0.1])  # red
+    # --- Visualization ---
+    ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])
+    target_vis = target_pcd.paint_uniform_color([0.8, 0.1, 0.1])
     o3d.visualization.draw_geometries(
         [ref_vis, target_vis],
-        window_name="Reference (green) vs Scaled SfM Target (red)",
-        width=900,
-        height=700
+        window_name="Reference (green) vs Scaled SfM Target (red)"
     )
 
     return {
         "ref_pcd": ref_pcd,
         "synthetic_pcd": target_pcd,
-        "transform_gt": transform_gt  # dummy
+        "transform_gt": transform_gt
     }
+
 
 
 
