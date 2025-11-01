@@ -202,7 +202,7 @@ def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold
     chamfer, hausdorff = compute_alignment_errors(ref_pcd, sfm_aligned)
     # sfm_aligned.paint_uniform_color([0.8, 0.1, 0.1])
     ref_vis = copy.deepcopy(ref_pcd)
-    # ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+    ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
     o3d.visualization.draw_geometries([ref_vis, sfm_aligned], window_name="After Coarse Alignment")
 
 
@@ -267,25 +267,50 @@ ref_pcd = gen.generate_test_pcds_sat()
 sfm_pcd = o3d.io.read_point_cloud(r"sparse\0\points_cleaned.ply")
 print(f"Number of points: {len(sfm_pcd.points)}")
 
+# # SCALE BY BOUNDING BOXES
+# # --- Compute OBBs ---
+# ref_obb = ref_pcd.get_oriented_bounding_box()
+# sfm_obb = sfm_pcd.get_oriented_bounding_box()
 
-# --- Compute OBBs ---
-ref_obb = ref_pcd.get_oriented_bounding_box()
-sfm_obb = sfm_pcd.get_oriented_bounding_box()
+# print(f"\nReference OBB dimensions: {ref_obb.extent}")
+# print(f"Original SfM OBB dimensions: {sfm_obb.extent}")
 
-print(f"\nReference OBB dimensions: {ref_obb.extent}")
-print(f"Original SfM OBB dimensions: {sfm_obb.extent}")
+# # --- Scale SfM cloud to match reference size ---
+# scale_factor = np.linalg.norm(ref_obb.extent) / np.linalg.norm(sfm_obb.extent)
+# sfm_center = sfm_obb.center
+# sfm_pcd.translate(-sfm_center)
+# sfm_pcd.scale(scale_factor, center=(0, 0, 0))
 
-# --- Scale SfM cloud to match reference size ---
-scale_factor = np.linalg.norm(ref_obb.extent) / np.linalg.norm(sfm_obb.extent)
-sfm_center = sfm_obb.center
-sfm_pcd.translate(-sfm_center)
-sfm_pcd.scale(scale_factor, center=(0, 0, 0))
+# # Recompute OBB after scaling & translation
+# sfm_obb = sfm_pcd.get_oriented_bounding_box()
+# print(f"Scaled SfM OBB dimensions: {sfm_obb.extent}")
 
-# Recompute OBB after scaling & translation
-sfm_obb = sfm_pcd.get_oriented_bounding_box()
-print(f"Scaled SfM OBB dimensions: {sfm_obb.extent}")
+# # --- Plot 1: point clouds only ---
+# ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
+# o3d.visualization.draw_geometries(
+#     [ref_vis, sfm_pcd],
+#     window_name="Reference (green) vs SfM (original colors)",
+#     width=900, height=700
+# )
 
-# --- Plot 1: point clouds only ---
+# # --- Plot 2: point clouds with OBBs ---
+# ref_obb_ls = o3d.geometry.LineSet.create_from_oriented_bounding_box(ref_obb)
+# ref_obb_ls.paint_uniform_color([0, 1, 0])  # green wireframe
+
+# sfm_obb_ls = o3d.geometry.LineSet.create_from_oriented_bounding_box(sfm_obb)
+# sfm_obb_ls.paint_uniform_color([1, 0, 0])  # red wireframe
+
+# o3d.visualization.draw_geometries(
+#     [ref_vis, ref_obb_ls, sfm_pcd, sfm_obb_ls],
+#     window_name="Reference (green) vs SfM (original colors) + OBBs",
+#     width=900, height=700
+# )
+
+
+# SCALE FROM BEN 
+scale_factor = 0.06906822580219837
+centroid = sfm_pcd.get_center()
+sfm_pcd.scale(scale_factor, center=centroid)
 ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
 o3d.visualization.draw_geometries(
     [ref_vis, sfm_pcd],
@@ -293,23 +318,19 @@ o3d.visualization.draw_geometries(
     width=900, height=700
 )
 
-# --- Plot 2: point clouds with OBBs ---
-ref_obb_ls = o3d.geometry.LineSet.create_from_oriented_bounding_box(ref_obb)
-ref_obb_ls.paint_uniform_color([0, 1, 0])  # green wireframe
 
-sfm_obb_ls = o3d.geometry.LineSet.create_from_oriented_bounding_box(sfm_obb)
-sfm_obb_ls.paint_uniform_color([1, 0, 0])  # red wireframe
-
-o3d.visualization.draw_geometries(
-    [ref_vis, ref_obb_ls, sfm_pcd, sfm_obb_ls],
-    window_name="Reference (green) vs SfM (original colors) + OBBs",
-    width=900, height=700
-)
-
+# SCALE FROM OLLIE 
+# scale_factor = ???
+# centroid = sfm_pcd.get_center()
+# sfm_pcd.scale(scale_factor, center=centroid)
+# ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
+# o3d.visualization.draw_geometries(
+#     [ref_vis, sfm_pcd],
+#     window_name="Reference (green) vs SfM (original colors)",
+#     width=900, height=700
+# )
 
 
-
-# sfm_final, final_transform = align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100)
 sfm_final, final_transform = align_with_chamfer_then_icp(
     ref_pcd, sfm_pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100
 )
