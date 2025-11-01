@@ -60,62 +60,6 @@ with open("checkerboard.pkl", "rb") as f:
 print("Loaded saved SfM pipeline and checkerboard data")
 
 
-# Generate synethic test point cloud (mimic sfm)
-sfm_pcd = sfm_pipeline.generate_synthetic_sfm_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05]) # , noise_level = 0.001)
-
-# Align point clouds
-ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
-
-
-def chamfer_distance(pcd1, pcd2):
-    """
-    Compute symmetric Chamfer distance between two point clouds.
-    Args:
-        pcd1, pcd2: open3d.geometry.PointCloud
-    Returns:
-        float: Chamfer distance (mean symmetric)
-    """
-    # One direction: pcd1 → pcd2
-    d1 = np.asarray(pcd1.compute_point_cloud_distance(pcd2))
-    # Reverse direction: pcd2 → pcd1
-    d2 = np.asarray(pcd2.compute_point_cloud_distance(pcd1))
-    
-    chamfer = np.mean(d1**2) + np.mean(d2**2)
-    return chamfer
-
-
-def hausdorff_distance(pcd1, pcd2):
-    """
-    Compute symmetric Hausdorff distance between two point clouds.
-    Args:
-        pcd1, pcd2: open3d.geometry.PointCloud
-    Returns:
-        float: Hausdorff distance (symmetric max distance)
-    """
-    # One direction: each point in pcd1 to nearest in pcd2
-    d1 = np.asarray(pcd1.compute_point_cloud_distance(pcd2))
-    # Reverse direction
-    d2 = np.asarray(pcd2.compute_point_cloud_distance(pcd1))
-    
-    hausdorff = max(np.max(d1), np.max(d2))
-    return hausdorff
-
-
-cd = chamfer_distance(ref_pcd, target_aligned)
-hd = hausdorff_distance(ref_pcd, target_aligned)
-
-print(f"Chamfer distance:   {cd:.6f}")
-print(f"Hausdorff distance: {hd:.6f}")
-
-
-
-
-
-
-
-
-import numpy as np
-import open3d as o3d
 import point_cloud_utils as pcu
 
 def compute_alignment_errors(ref_pcd, test_pcd):
@@ -137,15 +81,79 @@ def compute_alignment_errors(ref_pcd, test_pcd):
     print(f"Chamfer distance: {chamfer:.6f}")
     print(f"Hausdorff distance: {hausdorff:.6f}")
 
-    return {"chamfer": chamfer, "hausdorff": hausdorff}
+    return chamfer, hausdorff
+
+
+
+
+# Generate synethic test point cloud (mimic sfm)
+sfm_pcd = sfm_pipeline.generate_synthetic_sfm_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05]) # , noise_level = 0.001)
+
+# Align point clouds
+ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
 
 
 # ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
-errors = compute_alignment_errors(ref_pcd, target_aligned)
+chamfer, hausdorff = compute_alignment_errors(ref_pcd, target_aligned)
+
+
+
+# Generate synethic test point cloud (mimic sfm)
+sfm_pcd = sfm_pipeline.generate_synthetic_sfm_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05], noise_level = 0.01)
+
+# Align point clouds
+ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
+
+
+# ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
+chamfer, hausdorff = compute_alignment_errors(ref_pcd, target_aligned)
 
 
 
 
 
 
+
+
+
+
+# def chamfer_distance(pcd1, pcd2):
+#     """
+#     Compute symmetric Chamfer distance between two point clouds.
+#     Args:
+#         pcd1, pcd2: open3d.geometry.PointCloud
+#     Returns:
+#         float: Chamfer distance (mean symmetric)
+#     """
+#     # One direction: pcd1 → pcd2
+#     d1 = np.asarray(pcd1.compute_point_cloud_distance(pcd2))
+#     # Reverse direction: pcd2 → pcd1
+#     d2 = np.asarray(pcd2.compute_point_cloud_distance(pcd1))
+    
+#     chamfer = np.mean(d1**2) + np.mean(d2**2)
+#     return chamfer
+
+
+# def hausdorff_distance(pcd1, pcd2):
+#     """
+#     Compute symmetric Hausdorff distance between two point clouds.
+#     Args:
+#         pcd1, pcd2: open3d.geometry.PointCloud
+#     Returns:
+#         float: Hausdorff distance (symmetric max distance)
+#     """
+#     # One direction: each point in pcd1 to nearest in pcd2
+#     d1 = np.asarray(pcd1.compute_point_cloud_distance(pcd2))
+#     # Reverse direction
+#     d2 = np.asarray(pcd2.compute_point_cloud_distance(pcd1))
+    
+#     hausdorff = max(np.max(d1), np.max(d2))
+#     return hausdorff
+
+
+# cd = chamfer_distance(ref_pcd, target_aligned)
+# hd = hausdorff_distance(ref_pcd, target_aligned)
+
+# print(f"Chamfer distance:   {cd:.6f}")
+# print(f"Hausdorff distance: {hd:.6f}")
 
