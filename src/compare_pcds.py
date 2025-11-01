@@ -110,6 +110,8 @@ chamfer, hausdorff = compute_alignment_errors(ref_pcd, target_aligned)
 
 
 
+# TODO do voxel downsampling first?? 
+# Or just set to 1 and skip downsampling since less than 100,000 points 
 
 
 
@@ -117,43 +119,112 @@ chamfer, hausdorff = compute_alignment_errors(ref_pcd, target_aligned)
 
 
 
-# def chamfer_distance(pcd1, pcd2):
-#     """
-#     Compute symmetric Chamfer distance between two point clouds.
-#     Args:
-#         pcd1, pcd2: open3d.geometry.PointCloud
-#     Returns:
-#         float: Chamfer distance (mean symmetric)
-#     """
-#     # One direction: pcd1 → pcd2
-#     d1 = np.asarray(pcd1.compute_point_cloud_distance(pcd2))
-#     # Reverse direction: pcd2 → pcd1
-#     d2 = np.asarray(pcd2.compute_point_cloud_distance(pcd1))
-    
-#     chamfer = np.mean(d1**2) + np.mean(d2**2)
-#     return chamfer
 
 
-# def hausdorff_distance(pcd1, pcd2):
-#     """
-#     Compute symmetric Hausdorff distance between two point clouds.
-#     Args:
-#         pcd1, pcd2: open3d.geometry.PointCloud
-#     Returns:
-#         float: Hausdorff distance (symmetric max distance)
-#     """
-#     # One direction: each point in pcd1 to nearest in pcd2
-#     d1 = np.asarray(pcd1.compute_point_cloud_distance(pcd2))
-#     # Reverse direction
-#     d2 = np.asarray(pcd2.compute_point_cloud_distance(pcd1))
-    
-#     hausdorff = max(np.max(d1), np.max(d2))
-#     return hausdorff
 
 
-# cd = chamfer_distance(ref_pcd, target_aligned)
-# hd = hausdorff_distance(ref_pcd, target_aligned)
 
-# print(f"Chamfer distance:   {cd:.6f}")
-# print(f"Hausdorff distance: {hd:.6f}")
 
+import numpy as np
+import open3d as o3d
+import point_cloud_utils as pcu
+import itertools
+import copy
+
+
+def global_chamfer_align(ref_pcd, sfm_pcd, rotations=np.linspace(0, 360, 12), translations=[0], voxel_size=None):
+    """
+    Coarse alignment of sfm_pcd to ref_pcd by minimizing Chamfer distance over discrete rotations (global search).
+    """
+    ref_pts = np.asarray(ref_pcd.points)
+    sfm_pts_orig = np.asarray(sfm_pcd.points)
+
+    if voxel_size is not None:
+        ref_pcd = ref_pcd.voxel_down_sample(voxel_size)
+        sfm_pcd = sfm_pcd.voxel_down_sample(voxel_size)
+        ref_pts = np.asarray(ref_pcd.points)
+        sfm_pts_orig = np.asarray(sfm_pcd.points)
+
+    # Ensure row-major, float64
+    ref_pts = np.ascontiguousarray(ref_pts, dtype=np.float64)
+    sfm_pts_orig = np.ascontiguousarray(sfm_pts_orig, dtype=np.float64)
+
+    best_cd = np.inf
+    best_transform = np.eye(4)
+
+    angles_deg = list(rotations)
+    angle_combinations = itertools.product(angles_deg, repeat=3)
+
+    for rx, ry, rz in angle_combinations:
+        rad = np.deg2rad([rx, ry, rz])
+        R = sfm_pcd.get_rotation_matrix_from_xyz(rad)
+
+        # Apply rotation to the original SfM points
+        sfm_pts_rot = (R @ sfm_pts_orig.T).T  # (N,3) row-major
+
+        for tx in translations:
+            for ty in translations:
+                for tz in translations:
+                    pts_trans = sfm_pts_rot + np.array([tx, ty, tz], dtype=np.float64)
+                    pts_trans = np.ascontiguousarray(pts_trans, dtype=np.float64)
+
+                    cd = pcu.chamfer_distance(pts_trans, ref_pts)
+
+                    if cd < best_cd:
+                        best_cd = cd
+                        best_transform = np.eye(4)
+                        best_transform[:3, :3] = R
+                        best_transform[:3, 3] = np.array([tx, ty, tz], dtype=np.float64)
+
+    print(f"[INFO] Best Chamfer distance: {best_cd:.6f}")
+    print(f"[INFO] Best transform:\n{best_transform}")
+
+    return best_transform
+
+
+def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100):
+    """
+    Align sfm_pcd to ref_pcd using global Chamfer-based coarse alignment + ICP refinement.
+    """
+    # --- Global search ---
+    coarse_transform = global_chamfer_align(ref_pcd, sfm_pcd, voxel_size=voxel_size)
+
+    sfm_aligned = copy.deepcopy(sfm_pcd).transform(coarse_transform)
+
+    # --- ICP refinement ---
+    if icp_threshold is None:
+        # Use ~2% of object size
+        ref_obb = ref_pcd.get_oriented_bounding_box()
+        icp_threshold = np.linalg.norm(ref_obb.extent) * 0.02
+
+    reg = o3d.pipelines.registration.registration_icp(
+        sfm_aligned, ref_pcd, icp_threshold,
+        np.eye(4),
+        o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+        o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=icp_max_iter)
+    )
+
+    final_transform = reg.transformation @ coarse_transform
+    sfm_final = copy.deepcopy(sfm_pcd).transform(final_transform)
+    # Or inversve
+    # sfm_final = copy.deepcopy(sfm_pcd).transform(np.linalg.inv(final_transform))
+
+    return sfm_final, final_transform
+
+# Generate synethic test point cloud (mimic sfm)
+sfm_pcd = sfm_pipeline.generate_synthetic_sfm_pcd(ref_pcd, rotation_degrees=[5,2,4], translation=[0, 0, 0], noise_level = 0.001)
+
+sfm_final, final_transform = align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100)
+
+
+# --- Visualize after alignment ---
+# target_aligned = copy.deepcopy(target_pcd).transform(combined_transform)
+# target_aligned = copy.deepcopy(sfm_final).transform(np.linalg.inv(final_transform))
+
+sfm_final.paint_uniform_color([0.8, 0.1, 0.1])
+ref_vis = copy.deepcopy(ref_pcd)
+ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+o3d.visualization.draw_geometries([ref_vis, sfm_final], window_name="After Alignment")
+
+
+chamfer, hausdorff = compute_alignment_errors(ref_pcd, sfm_final)
