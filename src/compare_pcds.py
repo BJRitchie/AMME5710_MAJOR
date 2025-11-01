@@ -308,19 +308,7 @@ print(f"Number of points: {len(sfm_pcd.points)}")
 
 
 # SCALE FROM BEN 
-scale_factor = 0.06906822580219837
-centroid = sfm_pcd.get_center()
-sfm_pcd.scale(scale_factor, center=centroid)
-ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
-o3d.visualization.draw_geometries(
-    [ref_vis, sfm_pcd],
-    window_name="Reference (green) vs SfM (original colors)",
-    width=900, height=700
-)
-
-
-# SCALE FROM OLLIE 
-# scale_factor = ???
+# scale_factor = 0.06906822580219837
 # centroid = sfm_pcd.get_center()
 # sfm_pcd.scale(scale_factor, center=centroid)
 # ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
@@ -329,6 +317,62 @@ o3d.visualization.draw_geometries(
 #     window_name="Reference (green) vs SfM (original colors)",
 #     width=900, height=700
 # )
+
+
+# SCALE FROM OLLIE 
+# Load COLMAP reconstruction
+import os
+sparse_path = "sparse/0"
+rec = pycolmap.Reconstruction(sparse_path)
+sfm_images = sorted(rec.images.values(), key=lambda x: x.name)
+
+# ---------------------------------------------------------
+# Get SFM and Checkerboard poses
+# ---------------------------------------------------------
+sfm_rotations, sfm_translations = sfm_pipeline.get_poses()
+checker_rotations, checker_translations = cb.get_camera_poses()
+
+# ---------------------------------------------------------
+# Match corresponding image names
+# ---------------------------------------------------------
+cb_images = cb._checker_image_names
+matched_indices_sfm = []
+matched_indices_cb = []
+
+for j, cb_name in enumerate(cb_images):
+    for i, sfm_img in enumerate(sfm_images):
+        if os.path.basename(sfm_img.name) == os.path.basename(cb_name):
+            matched_indices_sfm.append(i)
+            matched_indices_cb.append(j)
+            break
+
+# ---------------------------------------------------------
+# Compute robust scale factor between matched poses
+# ---------------------------------------------------------
+sfm_translations_matched = [sfm_translations[i].reshape(3) for i in matched_indices_sfm]
+checker_positions = np.hstack(cb.get_camera_poses()[1]).T  # shape (N,3) in meters
+
+scale_factors = []
+n = len(sfm_translations_matched)
+
+for i in range(n):
+    for j in range(i + 1, n):
+        d_sfm = np.linalg.norm(sfm_translations_matched[j] - sfm_translations_matched[i])
+        d_m = np.linalg.norm(checker_positions[j] - checker_positions[i])
+        if d_sfm > 1e-9:  # avoid division by zero
+            scale_factors.append(d_m / d_sfm)
+
+scale_factor = np.mean(scale_factors)
+print(f"\nEstimated metric scale factor: {scale_factor:.6f} meters per COLMAP unit")
+
+centroid = sfm_pcd.get_center()
+sfm_pcd.scale(scale_factor, center=centroid)
+ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
+o3d.visualization.draw_geometries(
+    [ref_vis, sfm_pcd],
+    window_name="Reference (green) vs SfM (original colors)",
+    width=900, height=700
+)
 
 
 sfm_final, final_transform = align_with_chamfer_then_icp(
