@@ -22,7 +22,6 @@ class PointCloudMatcher:
         self._pc0 = None 
         self._pc1 = None  
 
-        
         pass
     
     def matchFromPosesRANSAC( self, poses0, poses1, threshold=0.02, max_iter=1000, ransac_samples=5 ): 
@@ -38,7 +37,6 @@ class PointCloudMatcher:
             R, t, s, T = self.matchFromPosesUmeyama(poses0[:, idx], poses1[:, idx])
 
             # Compute alignment error for all points
-            # transformed = s * np.einsum('ij,jk->ik', R, poses0) + t.reshape(3, 1) 
             transformed = np.empty_like(poses0)
             for i in range(N):
                 transformed[:, i] = s * (R @ poses0[:, i]) + t 
@@ -148,6 +146,95 @@ class PointCloudMatcher:
         
         return R, t.flatten(), s, T
 
+    def matchFromPosesOrientsRANSAC( self, poses0, rots0, poses1, rots1, w_rot=1.0, max_iter=1000, ransac_samples =5, threshold=0.02 ): 
+        N = poses0.shape[1]
+        best_inliers = [] 
+
+        # Try fit using samples, check for quality of fit (RANSAC)
+            # Keep the best fit
+        for _ in range(max_iter):
+            # Random 3-point subset
+            idx = np.random.choice(N, ransac_samples, replace=False)
+            R, t, s, T = self.matchFromPosesWithOrientation(
+                poses0[:, idx], rots0[:, :, idx], poses1[:, idx], rots1[:, :, idx]) 
+
+            # Compute alignment error for all points
+            # transformed = np.empty_like(poses0)
+            # for i in range(N):
+            #     transformed[:, i] = s * (R @ poses0[:, i]) + t 
+            
+            # errors = np.linalg.norm(transformed - poses1, axis=0)
+            errors = self._residuals( poses0, rots0, poses1, rots1, s, R, t, w_rot )
+            inliers = np.where(errors < threshold)[0] 
+
+            if len(inliers) > len(best_inliers):
+                best_inliers = inliers
+
+        # Refine using all inliers
+        if len(best_inliers) >= 3:
+            R, t, s, T = self.matchFromPosesWithOrientation(
+                poses0[:, best_inliers], rots0[:, :, best_inliers], 
+                poses1[:, best_inliers], rots1[:, :, best_inliers], w_rot=w_rot) 
+        else:
+            print("Warning: Too few inliers. ")
+            R, t, s, T = self.matchFromPosesWithOrientation(
+                poses0, rots0, poses1, rots1, w_rot=w_rot) 
+
+        return R, t, s, T, best_inliers 
+
+    def matchFromPosesWithOrientation(self, poses0, rots0, poses1, rots1, w_rot=1.0):
+        """
+        Estimate similarity transform (s, R, t) using both camera positions and orientations.
+        Minimizes combined translation + orientation misalignment.
+        """
+        import cv2 
+        
+        # --- Step 1: Get initial guess from Umeyama (positions only)
+        R_init, t_init, s_init, T_init = self.matchFromPosesUmeyama(poses0, poses1)
+
+        # --- Step 2: Refine with orientation cost (optional)
+        def residual(params):
+            s = params[0]
+            rvec = params[1:4]
+            t = params[4:7]
+            
+            Rg, _ = cv2.Rodrigues(rvec)
+            
+            # Transform positions
+            # transformed = s * (Rg @ poses0) + t.reshape(3,1)
+            N = poses0.shape[1] 
+            transformed = np.empty_like(poses0) 
+            for i in range(N):
+                transformed[:, i] = s * (Rg @ poses0[:, i]) - t
+            pos_err = np.linalg.norm(transformed - poses1, axis=0).mean()
+            
+            # Orientation error: angle between Rg @ R0 and R1
+            rot_errs = []
+            for i in range(rots0.shape[2]):
+                R_pred = Rg @ rots0[:, :, i]
+                dR = R_pred.T @ rots1[:, :, i]
+                angle = np.arccos(np.clip((np.trace(dR) - 1)/2, -1, 1))
+                rot_errs.append(angle)
+                
+            rot_err = np.mean(rot_errs)
+            return pos_err + w_rot * rot_err
+
+        # Minimise the orientation cost 
+        from scipy.optimize import minimize
+        x0 = np.hstack([s_init, np.zeros(3), t_init])
+        res = minimize(residual, x0, method='Powell')
+
+        s = res.x[0]
+        rvec = res.x[1:4]
+        t = res.x[4:7] 
+        Rg, _ = cv2.Rodrigues(rvec)
+
+        T = np.eye(4)
+        T[:3, :3] = s * Rg
+        T[:3, 3] = t
+
+        return Rg, t, s, T
+
     def transformPointClouds( self, pc0, pc1  ): 
         """Transforms pointcloud 0 into the same frame of reference as pointcloud 1. 
 
@@ -177,7 +264,7 @@ class PointCloudMatcher:
             pc0_t[:, i] = self._s * (self._R @ pnt) + self._t
 
         # Store 
-        self._pc0 = pc0
+        self._pc0 = self._s * pc0 # scale to size 
         self._pc1 = pc1
         self._pc0_t = pc0_t 
 
@@ -208,54 +295,71 @@ class PointCloudMatcher:
             cam_rots_t[:, :, i] = self._R @ R0
 
         # Store internally 
-        self._cam_centers0 = cam_centers_t 
-        self._cam_rots0 = cam_rots_t 
+        self._cam_centers0 = self._s * cam_centers0 # scale to same size as others 
+        self._cam_rots0 = cam_rots0 
+        self._cam_centers0_t = cam_centers_t 
+        self._cam_rots0_t = cam_rots_t 
         self._cam_centers1 = cam_centers1 
         self._cam_rots1 = cam_rots1 
         
         return cam_centers_t, cam_rots_t
     
-    def plotPointClouds(self, camera_scale=0.1, show_frustums=True):
+    def plotMultiPointClouds(self, camera_scale=0.1, show_frustums=True, plot_original=False):
         """
-        Visualize the matched point clouds and all associated camera poses.
+        Visualize original, transformed, and target point clouds along with their camera poses.
+        Uses consistent world-space transformation logic as in the COLMAP plotting function.
 
-        - Frame 0 (transformed): red
-        - Frame 1 (reference): cyan
-
-        Args:
-            camera_scale (float): Scale of camera coordinate frames and frustums.
-            show_frustums (bool): Whether to draw simple camera frustums.
+        Colors:
+            - Green  = Original pc0 and cameras (Frame 0)
+            - Red    = Transformed pc0_t and cameras (Frame 0 transformed)
+            - Blue   = Target pc1 and cameras (Frame 1)
         """
-        assert self._pc0 is not None and self._pc0_t is not None, "Pointclouds are not defined."
+        import open3d as o3d
+        import numpy as np
+
+        assert self._pc0 is not None and self._pc0_t is not None and self._pc1 is not None, "Missing point clouds."
         assert hasattr(self, "_cam_centers0") and hasattr(self, "_cam_centers1"), "Camera poses not defined."
+
+        r = [1.0, 0.0, 0.0]
+        g = [0.0, 1.0, 0.0]
+        b = [0.0, 0.0, 1.0]
 
         geometries = []
 
         # --- Convert arrays to Open3D point clouds ---
-        pc0_o3d = o3d.geometry.PointCloud()
-        pc1_o3d = o3d.geometry.PointCloud()
-        pc0_o3d.points = o3d.utility.Vector3dVector(self._pc0_t.T)
-        pc1_o3d.points = o3d.utility.Vector3dVector(self._pc1.T)
-        pc0_o3d.paint_uniform_color([1.0, 0.0, 0.0])  # red = transformed (frame 0)
-        pc1_o3d.paint_uniform_color([0.0, 0.7, 1.0])  # cyan = reference (frame 1)
-        geometries.extend([pc0_o3d, pc1_o3d])
+        pc0_orig = o3d.geometry.PointCloud()
+        pc0_trans = o3d.geometry.PointCloud()
+        pc1 = o3d.geometry.PointCloud()
 
-        # --- Helper function for frustum drawing ---
-        def make_camera_frustum(center, R, color, scale):
-            """Create a small camera coordinate frame + pyramid frustum."""
+        pc0_orig.points = o3d.utility.Vector3dVector(self._pc0.T)
+        pc0_trans.points = o3d.utility.Vector3dVector(self._pc0_t.T)
+        pc1.points = o3d.utility.Vector3dVector(self._pc1.T)
+
+        pc0_orig.paint_uniform_color(g)
+        pc0_trans.paint_uniform_color(r)
+        pc1.paint_uniform_color(b)
+        
+        if plot_original: 
+            geometries.extend([pc0_orig, pc0_trans, pc1])
+        else: 
+            geometries.extend([pc0_trans, pc1])
+
+        # --- Helper to create frustum in world space ---
+        def make_camera_frustum(center, R_world_from_cam, color, scale):
+            """Create a small camera coordinate frame + pyramid frustum in world space."""
             geoms = []
 
-            # Coordinate frame
+            # Camera frame
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=scale)
             T = np.eye(4)
-            T[:3, :3] = R
+            T[:3, :3] = R_world_from_cam
             T[:3, 3] = center
             frame.transform(T)
             frame.paint_uniform_color(color)
             geoms.append(frame)
 
             if show_frustums:
-                # Define simple 4-corner frustum in local camera coordinates
+                # Define a simple frustum in camera coordinates
                 depth = scale * 2
                 w, h = scale, scale * 0.75
                 corners_cam = np.array([
@@ -265,7 +369,8 @@ class PointCloudMatcher:
                     [ w,  h, depth],
                     [-w,  h, depth],
                 ])
-                corners_world = (R @ corners_cam.T).T + center
+                # Transform to world space
+                corners_world = (R_world_from_cam @ corners_cam.T).T + center
 
                 lines = [[0,1],[0,2],[0,3],[0,4],[1,2],[2,3],[3,4],[4,1]]
                 line_set = o3d.geometry.LineSet()
@@ -276,22 +381,56 @@ class PointCloudMatcher:
 
             return geoms
 
-        # --- Plot all cameras for frame 1 (reference, cyan) ---
-        N1 = self._cam_centers1.shape[1]
-        for i in range(N1):
-            c = self._cam_centers1[:, i]
-            R = self._cam_rots1[:, :, i]
-            geometries.extend(make_camera_frustum(c, R, [0.0, 0.7, 1.0], camera_scale))
+        # --- Plot all camera sets ---
+        def add_cameras(cam_centers, cam_rots, color):
+            """Add a set of cameras to the geometry list."""
+            N = cam_centers.shape[1]
+            for i in range(N):
+                c = cam_centers[:, i]
+                R = cam_rots[:, :, i]
+                # Convert world→camera to camera→world if necessary
+                R_world_from_cam = R.T
+                geometries.extend(make_camera_frustum(c, R_world_from_cam, color, camera_scale))
 
-        # --- Plot all cameras for frame 0 (transformed, red) ---
-        N0 = self._cam_centers0.shape[1]
-        for i in range(N0):
-            c = self._cam_centers0[:, i]
-            R = self._cam_rots0[:, :, i]
-            geometries.extend(make_camera_frustum(c, R, [1.0, 0.0, 0.0], camera_scale))
+        # Original cameras (Frame 0)
+        if plot_original: 
+            add_cameras(self._cam_centers0, self._cam_rots0, g)
 
-        print(f"Visualizing {N0} + {N1} cameras and {len(np.array(self._pc0).T)} points per cloud.")
+        # Transformed cameras (Frame 0 aligned to Frame 1)
+        if hasattr(self, "_cam_centers0_t"):
+            add_cameras(self._cam_centers0_t, self._cam_rots0_t, r)
+
+        # Target/reference cameras (Frame 1)
+        add_cameras(self._cam_centers1, self._cam_rots1, b)
+
+        print(f"Visualizing {self._cam_centers0.shape[1]} + {self._cam_centers1.shape[1]} cameras and {self._pc0.shape[1]} points per cloud.")
+        print("Colors: green = original pc0, red = transformed pc0_t, blue = target pc1")
         o3d.visualization.draw_geometries(geometries)
+
+    def savePointcloud( self, savename ): 
+        
+        return 
+
+    def _residuals( self, poses0, rots0, poses1, rots1, s, R, t, w_rot=1.0 ): 
+        # Transform positions
+        N = poses0.shape[1] 
+        transformed = np.empty_like(poses0)
+        for i in range(N): 
+            transformed[:, i] = s * (R @ poses0[:, i]) + t
+
+        pos_err = np.linalg.norm(transformed - poses1, axis=0)
+        
+        # Orientation error: angle between Rg @ R0 and R1
+        rot_errs = []
+        for i in range(rots0.shape[2]):
+            R_pred = R @ rots0[:, :, i]
+            dR = R_pred.T @ rots1[:, :, i]
+            angle = np.arccos(np.clip((np.trace(dR) - 1)/2, -1, 1))
+            rot_errs.append(angle)
+            
+        rot_err = np.array(rot_errs) 
+        err = pos_err + w_rot * rot_err
+        return err 
 
 
 # test
@@ -317,7 +456,7 @@ if __name__ == "__main__":
     poses1_ = s_true_ * (R_true_ @ poses0_) + t_true_
 
     matcher_ = PointCloudMatcher()
-    R_, t_, s_, T_ = matcher_.matchFromPoses(poses0_, poses1_)
+    R_, t_, s_, T_ = matcher_.matchFromPosesRANSAC(poses0_, poses1_)
 
     print("Estimated scale:", s_)
     print("Estimated rotation:\n", R_)
@@ -386,15 +525,15 @@ if __name__ == "__main__":
     print(s_true)
 
     pc_matcher = PointCloudMatcher() 
-    R, t, s, T = pc_matcher.matchFromPoses( sfm_translations, synth_translations )
+    R_matcher, t_matcher, s_matcher, T_matcher = pc_matcher.matchFromPoses( sfm_translations, synth_translations )
 
     print("\n====== Umeyama ======") 
     print("R: ") 
-    print(R)
+    print(R_matcher)
     print("\nt: ") 
-    print(t)
+    print(t_matcher)
     print("\ns: ") 
-    print(s)
+    print(s_matcher)
 
     pc_matcher.transformPointClouds( sfm_pcd, synth_pcd )
     pc_matcher.transformCameraPoses( sfm_translations, sfm_rotations, synth_translations, synth_rotations )
