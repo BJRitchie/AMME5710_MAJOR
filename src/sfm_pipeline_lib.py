@@ -7,6 +7,7 @@ import open3d as o3d
 import matplotlib.pyplot as plt
 from plyfile import PlyData
 import copy
+from scipy.spatial.transform import Rotation
 
 class StrcFromMotion: 
     def __init__(self, 
@@ -1296,15 +1297,55 @@ class StrcFromMotion:
         }
 
 
+        
+    def generate_synthetic_sfm_pcd(self, ref_pcd, rotation_degrees=[10, 15, 20], translation=[0.1,0.2,0.05], 
+                                            noise_level=0.0, random_seed=42):
+        """
+        Create synthetic target point cloud by applying a known transform to a given reference point cloud.
+
+        Args:
+            ref_pcd: Open3D PointCloud object (reference)
+            rotation_degrees: rotation [rx, ry, rz] in degrees
+            translation: translation vector [tx, ty, tz]
+            noise_level: Gaussian noise std deviation
+            random_seed: reproducibility
+
+        Returns:
+            dict: synthetic target, known transform
+        """
+
+        np.random.seed(random_seed)
+
+        # Copy reference cloud
+        ref_pcd_copy = copy.deepcopy(ref_pcd)
+
+        # Rotation matrix
+        rotation_rad = np.radians(rotation_degrees)
+        r = Rotation.from_euler('xyz', rotation_rad)
+        R = r.as_matrix()
+
+        # 4x4 transformation
+        transform_gt = np.eye(4)
+        transform_gt[:3,:3] = R
+        transform_gt[:3,3] = translation
+
+        # Apply transform
+        synthetic_pcd = copy.deepcopy(ref_pcd_copy).transform(transform_gt)
+
+        # Add noise
+        if noise_level > 0:
+            points = np.asarray(synthetic_pcd.points)
+            points += np.random.normal(scale=noise_level, size=points.shape)
+            synthetic_pcd.points = o3d.utility.Vector3dVector(points)
+
+        return synthetic_pcd
+
 
     def verify_ppf_with_provided_pcds(self, ref_pcd, target_pcd, ground_truth_transform, expected_accuracy_threshold=0.01):
         """
         Verifies PPF + ICP on provided reference and target point clouds.
         Visualizes before and after alignment.
         """
-        import open3d as o3d
-        import copy
-        import numpy as np
 
         print("=== Verifying PPF Pipeline with Provided Point Clouds ===")
 
@@ -1381,6 +1422,66 @@ class StrcFromMotion:
             print(f"❌ VERIFICATION FAILED")
         return success
 
+
+
+    
+    def align_pcds(self, ref_pcd, target_pcd):
+        """
+        Verifies PPF + ICP on provided reference and target point clouds.
+        Visualizes before and after alignment.
+        """
+
+        print("=== Verifying PPF Pipeline with Provided Point Clouds ===")
+
+        # --- Visualize before alignment ---
+        ref_vis = copy.deepcopy(ref_pcd)
+        ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+        target_vis = copy.deepcopy(target_pcd)
+        target_vis.paint_uniform_color([0.8, 0.1, 0.1])
+        o3d.visualization.draw_geometries([ref_vis, target_vis], window_name="Before Alignment")
+
+        voxel_size = 0.005
+
+        # Compute normals
+        for pcd in [ref_pcd, target_pcd]:
+            pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size*2, max_nn=50))
+
+        # --- PPF matching ---
+        try:
+            T_est = self._ppf_matching(ref_pcd, target_pcd, voxel_size=voxel_size)
+            if T_est is None:
+                raise RuntimeError("PPF returned None")
+        except Exception as e:
+            print(f"PPF matching failed, falling back to voxel-downsampled ICP: {e}")
+            ref_down = ref_pcd.voxel_down_sample(voxel_size)
+            target_down = target_pcd.voxel_down_sample(voxel_size)
+            T_est = np.eye(4)
+            icp_coarse = o3d.pipelines.registration.registration_icp(
+                target_down, ref_down, max_correspondence_distance=voxel_size*5,
+                init=T_est, estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint()
+            )
+            T_est = icp_coarse.transformation
+
+        # ICP refinement
+        icp_result = o3d.pipelines.registration.registration_icp(
+            target_pcd, ref_pcd, max_correspondence_distance=voxel_size*5,
+            init=T_est, estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPlane()
+        )
+
+        # Sometimes needed inverse for visual alignment 
+
+        combined_transform = icp_result.transformation
+        # combined_transform = np.linalg.inv(combined_transform)
+
+        # --- Visualize after alignment ---
+        # target_aligned = copy.deepcopy(target_pcd).transform(combined_transform)
+        target_aligned = copy.deepcopy(target_pcd).transform(np.linalg.inv(combined_transform))
+        target_aligned.paint_uniform_color([0.8, 0.1, 0.1])
+        ref_vis = copy.deepcopy(ref_pcd)
+        ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+        o3d.visualization.draw_geometries([ref_vis, target_aligned], window_name="After Alignment")
+
+        return ref_pcd, target_aligned
 
 
     def save_registered_images(self, store_path="0", output_folder="registered_images"):
