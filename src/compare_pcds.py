@@ -85,33 +85,34 @@ def compute_alignment_errors(ref_pcd, test_pcd):
 
 
 
+# print("No noise\n")
 
-# Generate synethic test point cloud (mimic sfm)
-sfm_pcd = sfm_pipeline.generate_synthetic_sfm_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05]) # , noise_level = 0.001)
+# # Generate synethic test point cloud (mimic sfm)
+# sfm_pcd = sfm_pipeline.generate_synthetic_sfm_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05]) # , noise_level = 0.001)
 
-# Align point clouds
-ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
-
-
+# # Align point clouds
 # ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
-chamfer, hausdorff = compute_alignment_errors(ref_pcd, target_aligned)
 
 
-
-# Generate synethic test point cloud (mimic sfm)
-sfm_pcd = sfm_pipeline.generate_synthetic_sfm_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05], noise_level = 0.01)
-
-# Align point clouds
-ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
+# # ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
+# chamfer, hausdorff = compute_alignment_errors(ref_pcd, target_aligned)
 
 
+# print("Bit of noise\n")
+# # Generate synethic test point cloud (mimic sfm)
+# sfm_pcd = sfm_pipeline.generate_synthetic_sfm_pcd(ref_pcd, rotation_degrees=[5,5,5], translation=[0.1,0.2,0.05], noise_level = 0.01)
+
+# # Align point clouds
 # ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
-chamfer, hausdorff = compute_alignment_errors(ref_pcd, target_aligned)
+
+
+# # ref_pcd, target_aligned = sfm_pipeline.align_pcds(ref_pcd, sfm_pcd)
+# chamfer, hausdorff = compute_alignment_errors(ref_pcd, target_aligned)
 
 
 
-# TODO do voxel downsampling first?? 
-# Or just set to 1 and skip downsampling since less than 100,000 points 
+# # TODO do voxel downsampling first?? 
+# # Or just set to 1 and skip downsampling since less than 100,000 points 
 
 
 
@@ -197,6 +198,14 @@ def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold
 
     sfm_aligned = copy.deepcopy(sfm_pcd).transform(coarse_transform)
 
+    print("After coarse alginment")
+    chamfer, hausdorff = compute_alignment_errors(ref_pcd, sfm_aligned)
+    # sfm_aligned.paint_uniform_color([0.8, 0.1, 0.1])
+    ref_vis = copy.deepcopy(ref_pcd)
+    # ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+    o3d.visualization.draw_geometries([ref_vis, sfm_aligned], window_name="After Coarse Alignment")
+
+
     # --- ICP refinement ---
     if icp_threshold is None:
         # Use ~2% of object size
@@ -215,8 +224,90 @@ def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold
 
     return sfm_final, final_transform
 
-# Generate synethic test point cloud (mimic sfm)
-sfm_pcd = sfm_pipeline.generate_synthetic_sfm_pcd(ref_pcd, rotation_degrees=[5,2,4], translation=[4, 2, 3], noise_level = 0.001)
+# # Generate synethic test point cloud (mimic sfm)
+# sfm_pcd = sfm_pipeline.generate_synthetic_sfm_pcd(ref_pcd, rotation_degrees=[5,2,4], translation=[4, 2, 3], noise_level = 0.001)
+
+# # sfm_final, final_transform = align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100)
+# sfm_final, final_transform = align_with_chamfer_then_icp(
+#     ref_pcd, sfm_pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100
+# )
+
+# # --- Visualize after alignment ---
+# sfm_final.paint_uniform_color([0.8, 0.1, 0.1])
+# ref_vis = copy.deepcopy(ref_pcd)
+# ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+# o3d.visualization.draw_geometries([ref_vis, sfm_final], window_name="After Alignment")
+
+
+# chamfer, hausdorff = compute_alignment_errors(ref_pcd, sfm_final)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ref_pcd = gen.generate_test_pcds_sat()
+
+sfm_pcd = o3d.io.read_point_cloud(r"sparse\0\points_cleaned.ply")
+print(f"Number of points: {len(sfm_pcd.points)}")
+
+
+# --- Compute OBBs ---
+ref_obb = ref_pcd.get_oriented_bounding_box()
+sfm_obb = sfm_pcd.get_oriented_bounding_box()
+
+print(f"\nReference OBB dimensions: {ref_obb.extent}")
+print(f"Original SfM OBB dimensions: {sfm_obb.extent}")
+
+# --- Scale SfM cloud to match reference size ---
+scale_factor = np.linalg.norm(ref_obb.extent) / np.linalg.norm(sfm_obb.extent)
+sfm_center = sfm_obb.center
+sfm_pcd.translate(-sfm_center)
+sfm_pcd.scale(scale_factor, center=(0, 0, 0))
+
+# Recompute OBB after scaling & translation
+sfm_obb = sfm_pcd.get_oriented_bounding_box()
+print(f"Scaled SfM OBB dimensions: {sfm_obb.extent}")
+
+# --- Plot 1: point clouds only ---
+ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
+o3d.visualization.draw_geometries(
+    [ref_vis, sfm_pcd],
+    window_name="Reference (green) vs SfM (original colors)",
+    width=900, height=700
+)
+
+# --- Plot 2: point clouds with OBBs ---
+ref_obb_ls = o3d.geometry.LineSet.create_from_oriented_bounding_box(ref_obb)
+ref_obb_ls.paint_uniform_color([0, 1, 0])  # green wireframe
+
+sfm_obb_ls = o3d.geometry.LineSet.create_from_oriented_bounding_box(sfm_obb)
+sfm_obb_ls.paint_uniform_color([1, 0, 0])  # red wireframe
+
+o3d.visualization.draw_geometries(
+    [ref_vis, ref_obb_ls, sfm_pcd, sfm_obb_ls],
+    window_name="Reference (green) vs SfM (original colors) + OBBs",
+    width=900, height=700
+)
+
+
+
 
 # sfm_final, final_transform = align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100)
 sfm_final, final_transform = align_with_chamfer_then_icp(
@@ -224,7 +315,7 @@ sfm_final, final_transform = align_with_chamfer_then_icp(
 )
 
 # --- Visualize after alignment ---
-sfm_final.paint_uniform_color([0.8, 0.1, 0.1])
+# sfm_final.paint_uniform_color([0.8, 0.1, 0.1])
 ref_vis = copy.deepcopy(ref_pcd)
 ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
 o3d.visualization.draw_geometries([ref_vis, sfm_final], window_name="After Alignment")
