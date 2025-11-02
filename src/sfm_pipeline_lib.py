@@ -127,22 +127,42 @@ class StrcFromMotion:
         print("Saved sparse point cloud to", self._points_ply)
 
         return 
-
-    def clean_pointcloud( self, store_path="0", nb_points=50, radius=10.0 ):         
+    
+    # Clean a point cloud using Statistical Outlier Removal
+    def clean_pointcloud( self, nb_neighbors, std_ratio, store_path="0"):         
         # Read the pcloud 
         path = os.path.join( self._sparse_path, store_path, "points.ply" ) 
         pcd = o3d.io.read_point_cloud( path ) 
         
-        # Apply radis outlier removal 
-        cl, ind = pcd.remove_radius_outlier( nb_points = nb_points, radius = radius )
-        
-        # Extract the inlier point cloud
-        denoised_pcd = pcd.select_by_index(ind) 
-        
+        # Apply Statistical Outlier Removal
+        _, ind = pcd.remove_statistical_outlier(nb_neighbors=nb_neighbors, std_ratio=std_ratio)
+
+        # Keep only inliers
+        denoised_pcd = pcd.select_by_index(ind)
+        print(f"Outlier cleaning: {len(pcd.points)} → {len(denoised_pcd.points)} points retained.")
+
         # Store back in ply file 
         o3d.io.write_point_cloud(path, denoised_pcd, write_ascii=False, compressed=False) 
 
-        return denoised_pcd
+        return 
+    
+
+    # Old radius removal - keeping in case need to tune more
+    # def clean_pointcloud( self, store_path="0", nb_points=50, radius=10.0 ):         
+    #     # Read the pcloud 
+    #     path = os.path.join( self._sparse_path, store_path, "points.ply" ) 
+    #     pcd = o3d.io.read_point_cloud( path ) 
+        
+    #     # Apply radis outlier removal 
+    #     cl, ind = pcd.remove_radius_outlier( nb_points = nb_points, radius = radius )
+        
+    #     # Extract the inlier point cloud
+    #     denoised_pcd = pcd.select_by_index(ind) 
+        
+    #     # Store back in ply file 
+    #     o3d.io.write_point_cloud(path, denoised_pcd, write_ascii=False, compressed=False) 
+
+    #     return denoised_pcd
     
     def make_reference_ply( self, ref_path="reference.ply" ):
         '''

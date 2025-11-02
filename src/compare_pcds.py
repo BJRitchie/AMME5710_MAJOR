@@ -39,6 +39,17 @@ import open3d as o3d
 # ) 
 
 
+# sfm_pipeline.make_reference_ply()
+# sfm_pipeline.plot_reference_model()
+
+# sfm_pipeline.resize_ims( store_path, 1200, 10 )
+# sfm_pipeline.prep_pointcloud() 
+# sfm_pipeline.make_pointcloud()
+# sfm_pipeline.clean_pointcloud() 
+# sfm_pipeline.plot_pointcloud()
+
+
+
 ## GENERATE REF SYNTHETIC POINT CLOUD ##
 # TODO Think these are also computing a target point cloud and gt, but then doing that again the function below - what if GT doesn't match??
 # TODO Delete synthetic test data function and add in from here? Or make it consistent 

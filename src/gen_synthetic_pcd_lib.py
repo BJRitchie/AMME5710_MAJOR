@@ -337,38 +337,38 @@ def generate_test_pcds_sat():
     # Sample points from the mesh
     ref_pcd = mesh.sample_points_poisson_disk(3000)
 
-    # Define a known small transform (rotation + translation)
-    angle = np.deg2rad(15)
-    R = ref_pcd.get_rotation_matrix_from_xyz((angle, angle / 2, angle / 3))
-    t = np.array([0.005, 0.003, 0.002])  # small translation (5 mm, 3 mm, 2 mm)
-    transform_gt = np.eye(4)
-    transform_gt[:3, :3] = R
-    transform_gt[:3, 3] = t
+    # # Define a known small transform (rotation + translation)
+    # angle = np.deg2rad(15)
+    # R = ref_pcd.get_rotation_matrix_from_xyz((angle, angle / 2, angle / 3))
+    # t = np.array([0.005, 0.003, 0.002])  # small translation (5 mm, 3 mm, 2 mm)
+    # transform_gt = np.eye(4)
+    # transform_gt[:3, :3] = R
+    # transform_gt[:3, 3] = t
 
-    # Apply transform to get target point cloud
-    target_pcd = copy.deepcopy(ref_pcd).transform(transform_gt)
+    # # Apply transform to get target point cloud
+    # target_pcd = copy.deepcopy(ref_pcd).transform(transform_gt)
 
-    # Add small noise to make the point sets non-identical
-    target_pts = np.asarray(target_pcd.points)
-    target_pts += np.random.normal(scale=0.0001, size=target_pts.shape)  # 0.1 mm noise
-    target_pcd.points = o3d.utility.Vector3dVector(target_pts)
+    # # Add small noise to make the point sets non-identical
+    # target_pts = np.asarray(target_pcd.points)
+    # target_pts += np.random.normal(scale=0.0001, size=target_pts.shape)  # 0.1 mm noise
+    # target_pcd.points = o3d.utility.Vector3dVector(target_pts)
 
     # Color and visualize both
     ref_vis = copy.deepcopy(ref_pcd)
     ref_vis.paint_uniform_color([0.1, 0.8, 0.1])   # green (reference)
 
-    target_vis = copy.deepcopy(target_pcd)
-    target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # red (transformed)
+    # target_vis = copy.deepcopy(target_pcd)
+    # target_vis.paint_uniform_color([0.8, 0.1, 0.1]) # red (transformed)
 
     o3d.visualization.draw_geometries(
-        [ref_vis, target_vis],
-        window_name="3 cm x 2 cm x 1 cm Box: Reference (green) vs Transformed (red)",
+        [ref_vis],
+        window_name="Reference Model",
         width=900,
         height=700,
         point_show_normal=False
     )
 
-    return ref_pcd # , target_pcd, transform_gt
+    return ref_pcd 
 
 
 # def generate_data_from_sfm(ref_pcd, sfm_points_path="sparse/0/points.ply"):
