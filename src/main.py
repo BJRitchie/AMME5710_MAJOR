@@ -225,14 +225,14 @@ def match_sfm_camera_poses(cb, sparse_path="sparse/0"):
 
 
 # Change between SAVE and LOAD to generate/load SFM and checkerboard pickle files
-mode = "LOAD" 
+mode = "SAVE" 
 img_interval = 1 # Include every nth image from video into SFM generation
 
 
 # File paths - TODO replace naming with concatenations 
-store_path= "images/octo_sat"
-vid_path = 'images/octo_sat.mp4'
-sfm_save_path = "images/octo_sat_sfm"
+store_path= "images/octosat"
+vid_path = 'images/octosat_136_lux2.mp4'
+sfm_save_path = "images/octosat_sfm"
 im_path = store_path
 db_path = "database.db"
 sparse_path = "sparse"
@@ -310,8 +310,8 @@ pc_matcher.plotMultiPointClouds( camera_scale=0.01 )
 ############# Pointcloud Matching #############
 
 # Try a few scale factors 
-scales = np.linspace(0.5*s, 2*s, 10) 
-best_scale_factor = None
+scales = np.linspace(.5*s, 2.0*s, 10) 
+best_scale_factor = None 
 best_chamfer = np.inf 
 chamfer_thresh = 0.01 
 
@@ -341,6 +341,7 @@ for scale_factor in scales:
 
 print("============== FINAL PLOT ==============") 
 print(f"BEST SCALE FACTOR: {best_scale_factor:.3f}")
+print(f"Relative to original s/s0: {best_scale_factor/s :.3f}") 
 
 pcd = copy.deepcopy(sfm_pcd)
 centroid = pcd.get_center()
