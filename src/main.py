@@ -117,7 +117,7 @@ def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold
     reg = o3d.pipelines.registration.registration_icp(
         sfm_aligned, ref_pcd, icp_threshold,
         np.eye(4),
-        o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+        o3d.pipelines.registration.TransformationEstimationPointToPlane(), # TransformationEstimationPointToPoint
         o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=icp_max_iter)
     )
 
@@ -227,7 +227,8 @@ if mode == "SAVE":
         device      =pycolmap.Device.cpu 
     ) 
 
-    sfm_pipeline.make_reference_pcd() # TODO Change this/change solidwork file it points to 
+    # sfm_pipeline.make_reference_pcd() # TODO Change this/change solidwork file it points to 
+    sfm_pipeline.make_reference_pcd()  
     sfm_pipeline.plot_reference_model()
     
     sfm_pipeline.generate_and_plot_pointcloud(
