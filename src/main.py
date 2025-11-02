@@ -47,7 +47,7 @@ import pickle
 
 
 # Change between SAVE and LOAD to generate/load SFM and checkerboard pickle files
-mode = "LOAD" 
+mode = "SAVE" 
 img_interval = 1 # Include every nth image from video into SFM generation
 
 
@@ -216,7 +216,7 @@ def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold
 
     sfm_aligned = copy.deepcopy(sfm_pcd).transform(coarse_transform)
 
-    print("After coarse alginment")
+    print("After coarse alignment")
     chamfer, hausdorff = compute_alignment_errors(ref_pcd, sfm_aligned)
     # sfm_aligned.paint_uniform_color([0.8, 0.1, 0.1])
     ref_vis = copy.deepcopy(ref_pcd)
@@ -251,8 +251,7 @@ def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold
 ref_pcd = gen.generate_test_pcds_sat()
 
 # Load in point cloud cleaned from outliers - TODO Replace with proper integration/class function
-sfm_pcd = o3d.io.read_point_cloud(r"sparse\0\points_cleaned.ply") # For Ollie use on local for now
-# sfm_pcd = o3d.io.read_point_cloud(r"sparse\0\points.ply") # Actual use this in final 
+sfm_pcd = o3d.io.read_point_cloud(r"sparse\0\points.ply") # Actual use this in final 
 print(f"SFM Model point cloud loaded\n")
 
 
@@ -261,7 +260,7 @@ scale_factor = 0.06906822580219837 # TODO Replace with integrated function
 centroid = sfm_pcd.get_center()
 sfm_pcd.scale(scale_factor, center=centroid)
 
-# Visualisation of reference and scaled SFM - TODO make into function
+# Visualisation of reference and scaled SFM - TODO make into function + centre them?
 ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
 o3d.visualization.draw_geometries(
     [ref_vis, sfm_pcd],
@@ -275,5 +274,6 @@ sfm_final, final_transform = align_with_chamfer_then_icp(
 )
 
 # Compute final error metrics
+print("\nFinal metrics")
 chamfer, hausdorff = compute_alignment_errors(ref_pcd, sfm_final)
 
