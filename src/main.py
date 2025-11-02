@@ -11,6 +11,9 @@ import open3d as o3d
 import point_cloud_utils as pcu 
 import itertools
 import copy
+from scipy.spatial.transform import Rotation
+from scipy.optimize import least_squares
+from scipy.spatial import cKDTree
 
 import sys
 import pickle
@@ -91,7 +94,7 @@ def global_chamfer_align(ref_pcd, sfm_pcd, rotations=np.linspace(0, 360, 12), vo
     return best_transform
 
 # TODO potentially experiment with parameters more
-def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100):
+def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100, show=False):
     """
     Align sfm_pcd to ref_pcd using global Chamfer-based coarse alignment + ICP refinement.
     """
@@ -101,12 +104,11 @@ def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold
 
     sfm_aligned = copy.deepcopy(sfm_pcd).transform(coarse_transform)
 
-    print("After coarse alignment")
-    chamfer, hausdorff = compute_alignment_errors(ref_pcd, sfm_aligned)
-    # sfm_aligned.paint_uniform_color([0.8, 0.1, 0.1])
-    ref_vis = copy.deepcopy(ref_pcd)
-    ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
-    o3d.visualization.draw_geometries([ref_vis, sfm_aligned], window_name="After Coarse Alignment")
+    if show: 
+        # sfm_aligned.paint_uniform_color([0.8, 0.1, 0.1])
+        ref_vis = copy.deepcopy(ref_pcd)
+        ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+        o3d.visualization.draw_geometries([ref_vis, sfm_aligned], window_name="After Coarse Alignment")
 
     # --- ICP refinement ---
     if icp_threshold is None:
@@ -117,18 +119,48 @@ def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold
     reg = o3d.pipelines.registration.registration_icp(
         sfm_aligned, ref_pcd, icp_threshold,
         np.eye(4),
-        o3d.pipelines.registration.TransformationEstimationPointToPoint(),
+        o3d.pipelines.registration.TransformationEstimationPointToPlane(), # TransformationEstimationPointToPoint
         o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=icp_max_iter)
     )
 
     final_transform = reg.transformation @ coarse_transform
     sfm_final = copy.deepcopy(sfm_pcd).transform(final_transform)
 
-    ref_vis = copy.deepcopy(ref_pcd)
-    ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
-    o3d.visualization.draw_geometries([ref_vis, sfm_final], window_name="After Alignment")
+    if show: 
+        ref_vis = copy.deepcopy(ref_pcd)
+        ref_vis.paint_uniform_color([0.1, 0.8, 0.1])
+        o3d.visualization.draw_geometries([ref_vis, sfm_final], window_name="After Alignment")
 
     return sfm_final, final_transform
+
+def match_sfm_camera_poses(cb, sparse_path="sparse/0"):
+    import os
+    import pycolmap
+
+    rec = pycolmap.Reconstruction(sparse_path)
+    images_sorted = sorted(rec.images.values(), key=lambda x: x.name)
+    name_to_index = {os.path.basename(img.name): i for i, img in enumerate(images_sorted)}
+    index_to_name = {i: os.path.basename(img.name) for i, img in enumerate(images_sorted)}
+
+    matched_indices_sfm = []
+    matched_indices_cb = []
+
+    print("===== Matched Image Pairs =====")
+    print(f"{'Checkerboard Image':40s}  |  {'SfM Image':40s}")
+
+    for j, cb_name in enumerate(cb._checker_image_names):
+        cb_base = os.path.basename(cb_name)
+        
+        if cb_base in name_to_index:
+            sfm_idx = name_to_index[cb_base]
+            sfm_name = index_to_name[sfm_idx]
+            print(f"{cb_base:40s}  |  {sfm_name:40s}")
+
+            matched_indices_sfm.append(sfm_idx)
+            matched_indices_cb.append(j)
+
+    print("\nTotal matched pairs:", len(matched_indices_sfm))
+    return np.array(matched_indices_sfm, dtype=int), np.array(matched_indices_cb, dtype=int)
 
 def match_sfm_camera_poses(cb, sparse_path="sparse/0"):
     import os
@@ -277,24 +309,58 @@ pc_matcher.plotMultiPointClouds( camera_scale=0.01 )
 ############# Pointcloud Matching #############
 
 # Scale SFM point cloud
-scale_factor = s # TODO Replace with integrated function 
-centroid = sfm_pcd.get_center()
-sfm_pcd.scale(scale_factor, center=centroid)
+# scale_factor = s # TODO Replace with integrated function 
+
+chamfer_thresh = 0.009
+
+# Try a few scale factors
+scales = np.linspace(0.5*s, 3*s, 10) 
+best_scale_factor = None
+best_chamfer = np.inf 
+
+for scale_factor in scales: 
+    print(f"Trying scale: {scale_factor:.3f}")
+
+    pcd = copy.deepcopy(sfm_pcd)
+    centroid = pcd.get_center()
+    pcd.scale(scale_factor, center=centroid)
+
+    # Align reference and SFM point clouds 
+    sfm_final, final_transform = align_with_chamfer_then_icp(
+        ref_pcd, pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100, show=False
+    )
+
+    # Compute final error metrics
+    print("\nFinal metrics")
+    chamfer, hausdorff = compute_alignment_errors(ref_pcd, sfm_final)
+    
+    if chamfer < best_chamfer: 
+        print(f"New best scale: {scale_factor:.3f}, chamfer: {chamfer:.3f}") 
+        best_scale_factor = scale_factor 
+        best_chamfer = chamfer 
+        
+    if chamfer < chamfer_thresh: 
+        break 
+
+print("============== FINAL PLOT ==============") 
+
+pcd = copy.deepcopy(sfm_pcd)
+centroid = pcd.get_center()
+pcd.scale(best_scale_factor, center=centroid)
 
 # Visualisation of reference and scaled SFM - TODO make into function + centre them?
-ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
-o3d.visualization.draw_geometries(
-    [ref_vis, sfm_pcd],
-    window_name="Reference and Scaled SfM Model",
-    width=900, height=700
-)
+# ref_vis = ref_pcd.paint_uniform_color([0.1, 0.8, 0.1])  # green
+# o3d.visualization.draw_geometries(
+#     [ref_vis, sfm_pcd],
+#     window_name="Reference and Scaled SfM Model",
+#     width=900, height=700
+# )
 
 # Align reference and SFM point clouds 
 sfm_final, final_transform = align_with_chamfer_then_icp(
-    ref_pcd, sfm_pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100
+    ref_pcd, pcd, voxel_size=None, icp_threshold=None, icp_max_iter=100, show=True
 )
 
 # Compute final error metrics
 print("\nFinal metrics")
 chamfer, hausdorff = compute_alignment_errors(ref_pcd, sfm_final)
-
