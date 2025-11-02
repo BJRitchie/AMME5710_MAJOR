@@ -82,6 +82,8 @@ def generate_synthetic_satellite():
     return ref_pcd, target_pcd, T_gt
 
 
+
+
 def generate_complex_test_pcds():
     """
     Generate a more complex point cloud shape to test alignment algorithms.
@@ -731,3 +733,12 @@ def generate_test_pcds_bbs(num_points=5000):
         "synthetic_pcd": target_pcd,
         "transform_gt": transform_gt
     }
+
+
+
+
+if __name__ == "__main__": 
+    # Display 
+    ref_pcd, target_pcd, T_gt = generate_synthetic_satellite()
+    o3d.visualization.draw_geometries(
+        [ref_pcd, target_pcd], window_name="generate_synthetic_satellite")

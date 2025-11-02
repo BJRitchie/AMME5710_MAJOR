@@ -119,7 +119,7 @@ def align_with_chamfer_then_icp(ref_pcd, sfm_pcd, voxel_size=None, icp_threshold
     reg = o3d.pipelines.registration.registration_icp(
         sfm_aligned, ref_pcd, icp_threshold,
         np.eye(4),
-        o3d.pipelines.registration.TransformationEstimationPointToPlane(), # TransformationEstimationPointToPoint
+        o3d.pipelines.registration.TransformationEstimationPointToPoint(), # TransformationEstimationPointToPoint
         o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=icp_max_iter)
     )
 
@@ -230,9 +230,9 @@ img_interval = 1 # Include every nth image from video into SFM generation
 
 
 # File paths - TODO replace naming with concatenations 
-store_path= "images/checker_nasa_box"
-vid_path = 'images/checker_nasa_box.mp4'
-sfm_save_path = "images/checker_nasa_box_sfm"
+store_path= "images/octo_sat"
+vid_path = 'images/octo_sat.mp4'
+sfm_save_path = "images/octo_sat_sfm"
 im_path = store_path
 db_path = "database.db"
 sparse_path = "sparse"
@@ -258,18 +258,12 @@ if mode == "SAVE":
         sift_ops    =sift_ops, 
         device      =pycolmap.Device.cpu 
     ) 
-
-    # sfm_pipeline.make_reference_pcd() # TODO Change this/change solidwork file it points to 
-    sfm_pipeline.make_reference_pcd()  
-    sfm_pipeline.plot_reference_model()
     
     sfm_pipeline.generate_and_plot_pointcloud(
         store_path, 1200, img_interval, 
         nb_pts1= 30, nb_pts2=60 
     )
     sfm_pipeline.save() 
-
-    # TODO Ben: check this against how you've used/called the checkerboard, change however you need
 
     # Save only the images that SfM used (for checkerboard) 
     sfm_pipeline.save_registered_images(output_folder=sfm_save_path)
@@ -294,7 +288,12 @@ else:
     sys.exit()
 
 # Generate reference point cloud - TODO replace with sfm_pipeline.make_reference() that makes a reference point cloud from SolidWorks file
-ref_pcd = gen.generate_test_pcds_sat()
+# ref_pcd = gen.generate_test_pcds_sat()
+
+# sfm_pipeline.make_reference_pcd() # TODO Change this/change solidwork file it points to 
+ref_pcd = sfm_pipeline.make_reference_pcd(num_points=5000, stl_file_path="sat_body_solid.stl")  
+centroid = ref_pcd.get_center()
+ref_pcd.scale(1.0/1000.0, center=centroid) # from mm to m 
 
 # Load in point cloud cleaned from outliers - TODO Replace with proper integration/class function
 sfm_pcd = o3d.io.read_point_cloud(r"sparse\0\points.ply") # Actual use this in final 
@@ -303,24 +302,21 @@ print(f"SFM Model point cloud loaded\n")
 ############# Camera Pose Matching #############
 
 from point_cloud_matcher import PointCloudMatcher 
+
 pc_matcher = PointCloudMatcher( sfm_pipeline, cb ) 
 R, t, s, T = pc_matcher.matchPoints( sparse_path+"/0" )
 pc_matcher.plotMultiPointClouds( camera_scale=0.01 ) 
 
 ############# Pointcloud Matching #############
 
-# Scale SFM point cloud
-# scale_factor = s # TODO Replace with integrated function 
-
-chamfer_thresh = 0.009
-
-# Try a few scale factors
-scales = np.linspace(0.5*s, 3*s, 10) 
+# Try a few scale factors 
+scales = np.linspace(0.5*s, 2*s, 10) 
 best_scale_factor = None
 best_chamfer = np.inf 
+chamfer_thresh = 0.01 
 
 for scale_factor in scales: 
-    print(f"Trying scale: {scale_factor:.3f}")
+    print(f"\n--- Trying scale: {scale_factor:.3f}")
 
     pcd = copy.deepcopy(sfm_pcd)
     centroid = pcd.get_center()
@@ -344,6 +340,7 @@ for scale_factor in scales:
         break 
 
 print("============== FINAL PLOT ==============") 
+print(f"BEST SCALE FACTOR: {best_scale_factor:.3f}")
 
 pcd = copy.deepcopy(sfm_pcd)
 centroid = pcd.get_center()

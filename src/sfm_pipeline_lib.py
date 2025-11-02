@@ -192,7 +192,7 @@ class StrcFromMotion:
         print(f"Extracted {len(rotations)} camera poses from SfM.")
         return rotations, translations, pcd 
     
-    def make_reference_pcd( self, ref_path="reference.ply", stl_file_path = "sat_model_stl.stl" ):
+    def make_reference_pcd( self, num_points = 1000, ref_path="reference.ply", stl_file_path = "sat_model_stl.stl" ):
         '''
         Convert reference model from STL file to PLY format for visualization
         and surface matching.
@@ -201,13 +201,16 @@ class StrcFromMotion:
         # Read the STL file
         stl_path = os.path.join( self._sat_model_path, stl_file_path )
         mesh = o3d.io.read_triangle_mesh( stl_path )
+        ref_pcd = mesh.sample_points_uniformly(number_of_points=num_points)
 
         # Convert to PLY format
         save_path = os.path.join( self._sat_model_path, ref_path )
-        o3d.io.write_triangle_mesh( save_path, mesh, write_ascii=False, compressed=False )
+        o3d.io.write_point_cloud(save_path, ref_pcd)  
+        
+        # o3d.io.write_triangle_mesh( save_path, mesh, write_ascii=False, compressed=False )
         print(f"Saved reference model to {save_path}")
 
-        return
+        return ref_pcd 
   
     def get_reference_pcd( self, ref_path="reference.ply" ): 
         
