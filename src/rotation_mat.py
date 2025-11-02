@@ -1,93 +1,89 @@
 import numpy as np
 
-"""
-# Example: three corresponding points in frames A and B
-A = np.array([
-    [37.41, 105.0, 29.1],
-    [42.11, 110.3, 31.5],
-    [38.9,  102.4, 28.2]
-])
-B = np.array([
-    [35.25, 12.43, 27.59],
-    [40.12, 15.80, 30.22],
-    [36.10, 11.60, 26.95]
-])
-"""
-def get_Rt(a, b): # Written by chat, unverified 
+def rotation_mat_degs(roll, pitch, yaw):
+    roll = np.deg2rad(roll)
+    Rx = np.array([ [1, 0, 0], 
+                    [0, np.cos(roll), -np.sin(roll)], 
+                    [0, np.sin(roll), np.cos(roll)] ])
+
+    # Rotation about Y axis
+    pitch = np.deg2rad(72)    
+    Ry = np.array([ [np.cos(pitch), 0, np.sin(pitch)], 
+                    [0, 1, 0], 
+                    [-np.sin(pitch), 0, np.cos(pitch)] ])
+
+    # Rotation about Z axis
+    yaw = np.deg2rad(132)      
+    Rz = np.array([ [np.cos(yaw), -np.sin(yaw), 0], 
+                    [np.sin(yaw), np.cos(yaw), 0], 
+                    [0, 0, 1 ] ]) 
+
+    return Rz @ Ry @ Rx 
+
+def minimal_rotation(a, b):
+    a = a/np.linalg.norm(a)
+    b = b/np.linalg.norm(b)
     
-    # Compute centroids
-    centroid_A = np.mean(a, axis=0)
-    centroid_B = np.mean(b, axis=0)
-
-    # Remove translation
-    A_centered = a - centroid_A
-    B_centered = b - centroid_B
-
-    # Compute covariance matrix
-    H = A_centered.T @ B_centered
-
-    # Compute rotation (Kabsch)
-    U, S, Vt = np.linalg.svd(H)
-    R = Vt.T @ U.T
-
-    # Ensure right-handed rotation (determinant +1)
-    if np.linalg.det(R) < 0:
-        Vt[-1, :] *= -1
-        R = Vt.T @ U.T
-
-    # Compute translation
-    t = centroid_B - R @ centroid_A
-
-    print("Rotation matrix R:")
-    print(R)
-    print("\nTranslation vector t:")
-    print(t)
-
-    # Verify mapping
-    print("\nCheck mapping:")
-    print("Predicted B =")
-    print((R @ a.T).T + t)
-    print("\nDifference:")
-    print(b - ((R @ a.T).T + t))
-
+    if np.allclose(a, b): return np.eye(3)
+    if np.allclose(a, -b):
+        # 180 deg: pick arbitrary orth perpendicular vector u
+        u = np.array([1.,0.,0.])
+        if abs(np.dot(u,a))>0.9: u = np.array([0.,1.,0.])
+        u = u - np.dot(u,a)*a
+        u /= np.linalg.norm(u)
+        # rotation by pi about u
+        return -np.eye(3) + 2*np.outer(u,u)
     
-    return 
+    v = np.cross(a,b)
+    s = np.linalg.norm(v)
+    c = np.dot(a,b)
+    K = np.array([[ 0, -v[2], v[1]],
+                  [ v[2], 0, -v[0]],
+                  [-v[1], v[0], 0]])
+    R = np.eye(3) + K + K.dot(K)/(1+c) 
+    return R
+
+def apply_transform( s, R, t, vec, rot_mats ):
+    assert len(vec.shape) == 2, "Vec must be 2D, shape 3xN. "
+    assert vec.shape[0] == 3, "Vec must be of shape 3xN. " 
+
+    # Number of points 
+    N = vec.shape[1] 
+
+    # Data storage 
+    translations = np.empty_like(vec)
+    rotations = np.empty_like(rot_mats)
+
+    # Apply transform 
+    for i in range(N):
+        
+        # Camera positions 
+        if type(vec) != type(None):
+            cam_pnt = vec[:, i]
+            translations[:, i] = s * (R @ cam_pnt) + t.T
+        
+        # Camera rotations 
+        if type(rot_mats) != type(None):
+            cam_rot = rot_mats[:, :, i]
+            rotations[:, :, i] = R @ cam_rot 
+        
+    return translations, rotations
 
 
-print("\n\n====== Manual ====== ") 
+if __name__ == "__main__":
+    a = np.array([
+        35.25, 0, -27.41
+    ])
+    b = np.array([
+        27.41, 0, -35.25
+    ])
 
-# Two vectors to the same point in different coordinate frames 
-a = np.array([ -46.08, -12.43, 27.59 ])
-b = np.array([ 105, -12.57, -30.9 ])
+    rmat = minimal_rotation(a, b) 
+    print("Rotation matrix: ")
+    print(rmat) 
 
-# Rotation about X axis
-roll = np.deg2rad(180)
-Rx = np.array([ [1, 0, 0], 
-                [0, np.cos(roll), -np.sin(roll)], 
-                [0, np.sin(roll), np.cos(roll)] ])
+    print( f"Test: R @ a = {rmat @ a}, b = {b}, b - R @ a = { b - rmat @ a }",  ) # This
 
-# Rotation about Y axis
-pitch = np.deg2rad(0)    
-Ry = np.array([ [np.cos(pitch), 0, np.sin(pitch)], 
-                [0, 1, 0], 
-                [-np.sin(pitch), 0, np.cos(pitch)] ])
-
-# Rotation about Z axis
-yaw = np.deg2rad(0)      
-Rz = np.array([ [np.cos(yaw), -np.sin(yaw), 0], 
-                [np.sin(yaw), np.cos(yaw), 0], 
-                [0, 0, 1 ] ]) 
-
-rmat= Rz @ Ry @ Rx 
-# Translation between coordinate frames 
-t = b - rmat @ a
-
-print("Rotation matrix: ")
-print(rmat) 
-
-print("\nTranslation Vector: ")
-print(t)
-
-print( f"\nManual Test: b = {b} = R @ a + t = {(rmat @ a) + t}",  ) 
-print( f"\nb - (R @ a + t) = { b - ((rmat @ a) + t) }") 
-
+    # So R @ a = b, R is the rotation matrix from a to b. 
+    
+    

@@ -1,3 +1,5 @@
+# use generate_test_pcds_sat 
+
 import pycolmap
 import pickle
 import open3d as o3d
@@ -11,10 +13,9 @@ import checkerboard_lib as checkerboard
 
 # Convert the video into images 
 # CHANGE TO WHATEVER VIDEO/POINT CLOUD YOU HAVE 
-store_path= "images/checker_nasa_box"
-vid_path = 'images/checker_nasa_box.mp4'
-sfm_save_path = "images/checker_nasa_box_sfm"
-gen_images_from_vid( vid_path, store_path ) 
+store_path= "images/checkerbox_nasa2"
+vid_path = 'images/checkerbox_nasa2.mp4'
+sfm_save_path = "images/checkerbox_nasa2_sfm"
 
 # Storage files 
 im_path = store_path
@@ -22,6 +23,10 @@ db_path = "database.db"
 sparse_path = "sparse"
 dense_path = "dense"
 sat_model_path = "sat_model"
+ref_path = "reference.ply"
+
+# Make images from the video 
+gen_images_from_vid( vid_path, store_path ) 
 
 # Settings 
 sift_ops = pycolmap.SiftExtractionOptions()
@@ -40,217 +45,138 @@ sfm_pipeline = pipeline.StrcFromMotion (
 ) 
 
 # Make SFM point cloud 
-sfm_pipeline.make_reference_ply()
-sfm_pipeline.plot_reference_model()
+sfm_pipeline.make_reference_pcd( ref_path ) 
 
-sfm_pipeline.resize_ims( store_path, 1200, 3 )
+sfm_pipeline.resize_ims( store_path, 1200, 2 )
 sfm_pipeline.prep_pointcloud() 
 sfm_pipeline.make_pointcloud()
-sfm_pipeline.clean_pointcloud() 
+sfm_pipeline.clean_pointcloud( nb_points=50, radius=1) 
 sfm_pipeline.plot_pointcloud()
-
 
 # Save only the images that SfM used
 sfm_pipeline.save_registered_images(output_folder=sfm_save_path)
 
+# Save pipeline class 
+sfm_pipeline.save(sfm_save_path+".pkl") 
 
 # Checkerboard detection on images the SFM used 
 cb = checkerboard.Checkerboard() 
 cb.read_ims(sfm_save_path) 
-cb.undistort_ims(grid_size=(3, 3), cell_size=0.0096)
+cb.undistort_ims(grid_size=(3,3), cell_size=0.0096)
 cb.plot_checkerboards() 
-
-
-# Save pipeline state for future reuse
-with open("sfm_pipeline.pkl", "wb") as f:
-    pickle.dump(sfm_pipeline, f)
-print("Saved SfM pipeline to 'sfm_pipeline.pkl'")
-
-with open("checkerboard.pkl", "wb") as f:
-    pickle.dump(cb, f)
-print("Saved checkerboard data to 'checkerboard.pkl'")
+cb.save() 
 
 # Load in pickle files
-# with open("sfm_pipeline.pkl", "rb") as f:
-#     sfm_pipeline = pickle.load(f)
+with open("sfm_pipeline.pkl", "rb") as f:
+    sfm_pipeline = pickle.load(f)
+    
+with open("checkerboard.pkl", "rb") as f:
+    cb = pickle.load(f)
 
-# with open("checkerboard.pkl", "rb") as f:
-#     cb = pickle.load(f)
-
-# print("Loaded saved SfM pipeline and checkerboard data")
-
-
-
+print("Loaded saved SfM pipeline and checkerboard data")
 
 # Checkerboard camera poses 
 checker_rotations, checker_translations = cb.get_camera_poses()
-
-# Old function to plot so doesn't use get_camera_poses but still visualises it 
-def plot_in_checkerboard_frame(cb):
-    """
-    Visualize the camera poses in the checkerboard (satellite) frame.
-    Each camera is shown relative to the fixed checkerboard.
-    """
-    assert hasattr(cb, "_rvecs") and hasattr(cb, "_tvecs"), "Run undistort_ims() first."
-
-    # Create checkerboard 3D points (same as in calibration)
-    objp = np.zeros((np.prod(cb._grid_size), 3), np.float32)
-    objp[:, :2] = np.indices(cb._grid_size).T.reshape(-1, 2)
-    objp *= cb._cell_size
-
-    axis_length = float(cb._cell_size * cb._grid_size[0] / 2)
-    geometries = []
-
-    # --- Fixed checkerboard in world (board) frame ---
-    pcd_board = o3d.geometry.PointCloud()
-    pcd_board.points = o3d.utility.Vector3dVector(objp)
-    pcd_board.paint_uniform_color([0.8, 0.8, 0.8])
-    geometries.append(pcd_board)
-
-    # Checkerboard frame
-    board_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_length * 1.2)
-    geometries.append(board_frame)
-
-    # --- Camera poses in board frame ---
-    for i, (rvec, tvec) in enumerate(zip(cb._rvecs, cb._tvecs)):
-        R_cam_board, _ = cv2.Rodrigues(rvec)
-        t_cam_board = np.asarray(tvec).reshape(3)
-
-        # Invert to get camera pose in board frame
-        R_board_cam = R_cam_board.T
-        t_board_cam = -R_board_cam @ t_cam_board
-
-        # Draw coordinate frame for this camera
-        cam_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=axis_length * 0.8)
-        cam_frame.rotate(R_board_cam, center=(0, 0, 0))
-        cam_frame.translate(t_board_cam)
-        geometries.append(cam_frame)
-
-    o3d.visualization.draw_geometries(
-        geometries,
-        window_name="Cameras in Checkerboard (Satellite) Frame",
-        width=1024,
-        height=768,
-        mesh_show_back_face=True
-    )
-
-plot_in_checkerboard_frame(cb)
-
+checker_translations = np.array(checker_translations)[:, :, 0].T # turn into 3xN
+checker_rotations = np.array(checker_rotations).transpose(1, 2, 0) # turn into 3xN
 
 # Get SFM camera poses 
-sfm_rotations, sfm_translations = sfm_pipeline.get_poses()
+sfm_rotations, sfm_translations, pcd = sfm_pipeline.get_pointcloud_and_poses()
+sfm_pcd = np.asarray(pcd.points).T 
+sfm_translations = np.array(sfm_translations)[:, :, 0].T 
+sfm_rotations = np.array(sfm_rotations).transpose(1, 2, 0)
 
+# Load reference ply 
+pcd = sfm_pipeline.get_reference_pcd( ref_path ) 
+ref_pcd = np.asarray(pcd.points).T 
+N = ref_pcd.shape[1]
 
-# Restrict to SFM camera poses to just checkerboard cameras 
-def match_sfm_camera_poses(cb, sparse_path = "sparse/0"):
+# Apply transform 
+sref = 0.0001
+Rref = np.array([
+    [ 1, 0, 0],
+    [ 0, -1, 0],
+    [ 0,  0, -1]])
+
+tref = np.array([151.08, -25., -3.31]) 
+
+transformed = np.empty_like(ref_pcd)
+for i in range(N):
+    transformed[:, i] = sref * ((Rref @ ref_pcd[:, i]) - tref)
+ref_pcd = transformed
+
+def match_sfm_camera_poses(cb, sparse_path="sparse/0"):
+    import os
+    import pycolmap
+
     rec = pycolmap.Reconstruction(sparse_path)
-    # sfm_images = sorted(rec.images.values(), key=lambda x: x.name) # sort by how good they are, but don't need here 
-    sfm_images = rec.images.values()
+    images_sorted = sorted(rec.images.values(), key=lambda x: x.name)
+    name_to_index = {os.path.basename(img.name): i for i, img in enumerate(images_sorted)}
+    index_to_name = {i: os.path.basename(img.name) for i, img in enumerate(images_sorted)}
 
-    cb_images = cb._checker_image_names
     matched_indices_sfm = []
     matched_indices_cb = []
 
-    for j, cb_name in enumerate(cb_images):
-        for i, sfm_img in enumerate(sfm_images):
-            if os.path.basename(sfm_img.name) == os.path.basename(cb_name):
-                print(os.path.basename(sfm_img.name))
-                matched_indices_sfm.append(i)
-                matched_indices_cb.append(j)
-                break
+    print("===== Matched Image Pairs =====")
+    print(f"{'Checkerboard Image':40s}  |  {'SfM Image':40s}")
 
-    return matched_indices_sfm
+    for j, cb_name in enumerate(cb._checker_image_names):
+        cb_base = os.path.basename(cb_name)
+        
+        if cb_base in name_to_index:
+            sfm_idx = name_to_index[cb_base]
+            sfm_name = index_to_name[sfm_idx]
+            print(f"{cb_base:40s}  |  {sfm_name:40s}")
 
-    # print(matched_indices_sfm)
-    # print(matched_indices_cb) 
+            matched_indices_sfm.append(sfm_idx)
+            matched_indices_cb.append(j)
 
-matched_indices_sfm = match_sfm_camera_poses(cb, sparse_path = "sparse/0")
+    print("\nTotal matched pairs:", len(matched_indices_sfm))
+    return np.array(matched_indices_sfm, dtype=int), np.array(matched_indices_cb, dtype=int)
+
+# Extract the matched poses 
+matched_indices_sfm, matched_indices_cb = match_sfm_camera_poses(cb, sparse_path = "sparse/0")
+sfm_translations_matched    = (sfm_translations[:, matched_indices_sfm])
+sfm_rotations_matched       = (sfm_rotations[:, :, matched_indices_sfm])
+checker_trans_matched       = (checker_translations[:, matched_indices_cb])
+checker_rot_matched         = (checker_rotations[:, :, matched_indices_cb])
+
+# Match pointclouds using camera poses 
+from point_cloud_matcher import PointCloudMatcher 
+
+pc_matcher = PointCloudMatcher() 
+R, t, s, T, best_inliers = pc_matcher.matchFromPosesRANSAC( 
+    poses0=sfm_translations_matched, 
+    poses1=checker_trans_matched, 
+    threshold=0.01, 
+    ransac_samples=10 ) 
+
+# R, t, s, T, best_inliers = pc_matcher.matchFromPosesOrientsRANSAC(
+#     poses0=sfm_translations_matched,
+#     rots0=sfm_rotations_matched, 
+#     poses1=checker_trans_matched, 
+#     rots1=checker_rot_matched,
+#     w_rot=1,
+#     ransac_samples=5, 
+#     threshold=0.1, 
+#     max_iter=1000
+# )
+
+# check SVD singular values:
+print(f"Number of inliers: { len(best_inliers) }")
+
+print("\n====== Umeyama ======") 
+print("R: ") 
+print(R)
+print("\nt: ") 
+print(t)
+print("\ns: ") 
+print(s)
+
+# pc_matcher.transformPointClouds( np.full_like(sfm_pcd, np.nan), np.full_like(sfm_pcd, np.nan) )
+# pc_matcher.transformPointClouds( sfm_pcd, ref_pcd )
+pc_matcher.transformPointClouds( sfm_pcd, np.full_like(ref_pcd, np.nan) )
+pc_matcher.transformCameraPoses( sfm_translations_matched, sfm_rotations_matched, checker_trans_matched, checker_rot_matched )
+pc_matcher.plotMultiPointClouds( camera_scale=0.01 ) 
 
 
-# Plot unscaled SFM with just the cmaeras matched to checkerboard cameras 
-def plot_pointcloud_matched(sparse_path, store_path="0", camera_scale=0.1, matched_indices=None):
-    """
-    Visualize a COLMAP sparse reconstruction (points + camera frustums), optionally only for matched poses.
-
-    Args:
-        sparse_path (str): Path to the parent sparse directory (e.g., "path/to/sparse").
-        store_path (str): Subfolder name (e.g., "0") containing the reconstruction and points.ply.
-        camera_scale (float): Scale factor for visualizing camera coordinate frames and frustums.
-        matched_indices (list[int], optional): List of indices of images to plot. If None, plots all cameras.
-    """
-    print("=== Loading and visualizing sparse point cloud with cameras ===")
-
-    # Construct paths
-    store_name = os.path.join(sparse_path, store_path)
-    file_path = os.path.join(store_name, "points.ply")
-
-    # Load point cloud
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"points.ply not found at {file_path}")
-    pcd = o3d.io.read_point_cloud(file_path)
-
-    # Load reconstruction (cameras + poses)
-    rec = pycolmap.Reconstruction(store_name)
-
-    # Sort images to make indexing consistent
-    images_sorted = sorted(rec.images.values(), key=lambda x: x.name)
-
-    # If matched_indices is not provided, plot all images
-    if matched_indices is None:
-        matched_indices = list(range(len(images_sorted)))
-
-    # Prepare visualization geometries
-    geometries = [pcd]
-
-    for idx in matched_indices:
-        image = images_sorted[idx]
-        cam_from_world = image.cam_from_world()
-        R = cam_from_world.rotation.matrix()  # world → camera
-        t = image.projection_center().flatten()  # camera center in world space
-
-        # --- Coordinate frame ---
-        camera_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=camera_scale)
-        T = np.eye(4)
-        T[:3, :3] = R.T  # world orientation
-        T[:3, 3] = t
-        camera_frame.transform(T)
-        geometries.append(camera_frame)
-
-        # --- Camera frustum ---
-        camera = rec.cameras[image.camera_id]
-        width, height = camera.width, camera.height
-        frustum_depth = camera_scale * 2
-
-        params = camera.params
-        if len(params) >= 2:
-            fx, fy = params[0], params[1]
-        else:
-            fx = fy = params[0] if len(params) > 0 else width
-
-        cx = width / 2
-        cy = height / 2
-
-        corners_cam = np.array([
-            [0, 0, 0],  # camera origin
-            [(0 - cx) * frustum_depth / fx, (0 - cy) * frustum_depth / fy, frustum_depth],
-            [(width - cx) * frustum_depth / fx, (0 - cy) * frustum_depth / fy, frustum_depth],
-            [(width - cx) * frustum_depth / fx, (height - cy) * frustum_depth / fy, frustum_depth],
-            [(0 - cx) * frustum_depth / fx, (height - cy) * frustum_depth / fy, frustum_depth],
-        ])
-
-        corners_world = (R.T @ corners_cam.T).T + t
-
-        lines = [[0, 1], [0, 2], [0, 3], [0, 4], [1, 2], [2, 3], [3, 4], [4, 1]]
-        colors = [[1, 0, 0] for _ in lines]
-
-        line_set = o3d.geometry.LineSet()
-        line_set.points = o3d.utility.Vector3dVector(corners_world)
-        line_set.lines = o3d.utility.Vector2iVector(lines)
-        line_set.colors = o3d.utility.Vector3dVector(colors)
-
-        geometries.append(line_set)
-
-    print(f"Visualizing {len(matched_indices)} cameras and {len(pcd.points)} points")
-    o3d.visualization.draw_geometries(geometries)
-
-plot_pointcloud_matched("sparse", store_path="0", camera_scale=0.1, matched_indices=matched_indices_sfm)

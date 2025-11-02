@@ -5,6 +5,7 @@ import open3d as o3d
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import glob 
+import pickle  
 
 class Checkerboard: 
     def __init__(self):
@@ -202,13 +203,19 @@ class Checkerboard:
             # Invert transformation to get camera in checkerboard/world frame
             R_cam = R_board.T
             C_cam = -R_board.T @ t_board
-
+            
             camera_rotations.append(R_cam)
             camera_positions.append(C_cam.reshape(3, 1))
 
         return camera_rotations, camera_positions
 
+    def save(self, savepath = "checkerboard.pkl"): 
+        with open(savepath, "wb") as f:
+            pickle.dump( self, f ) 
+        print(f"Saved checkerboard data to '{savepath}'")
 
+        return 
+        
 if __name__ == "__main__": 
     cb = Checkerboard() 
     cb.read_ims("images/checkerboards") 

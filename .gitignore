@@ -1,4 +1,7 @@
 *.bin
+*.bak
+*.pkl
+*.jpg
 .venv
 .vscode
 ceres* 

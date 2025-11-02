@@ -5,9 +5,9 @@ import os
 import shutil
 import open3d as o3d
 import matplotlib.pyplot as plt
-from plyfile import PlyData
 import copy
 from scipy.spatial.transform import Rotation
+import pickle
 
 class StrcFromMotion: 
     def __init__(self, 
@@ -146,25 +146,34 @@ class StrcFromMotion:
 
         return 
     
+    def get_pointcloud_and_poses( self, store_path="0" ): 
+        
+        store_name = os.path.join( self._sparse_path, store_path ) 
+        file_path =  os.path.join( self._sparse_path, store_path, "points.ply" )
+        
+        # Pointcloud 
+        pcd = o3d.io.read_point_cloud( file_path ) 
 
-    # Old radius removal - keeping in case need to tune more
-    # def clean_pointcloud( self, store_path="0", nb_points=50, radius=10.0 ):         
-    #     # Read the pcloud 
-    #     path = os.path.join( self._sparse_path, store_path, "points.ply" ) 
-    #     pcd = o3d.io.read_point_cloud( path ) 
-        
-    #     # Apply radis outlier removal 
-    #     cl, ind = pcd.remove_radius_outlier( nb_points = nb_points, radius = radius )
-        
-    #     # Extract the inlier point cloud
-    #     denoised_pcd = pcd.select_by_index(ind) 
-        
-    #     # Store back in ply file 
-    #     o3d.io.write_point_cloud(path, denoised_pcd, write_ascii=False, compressed=False) 
+        # Reconstruction 
+        rec = pycolmap.Reconstruction(store_name)
 
-    #     return denoised_pcd
+        rotations = []
+        translations = []
+
+        # Sort images by name for consistent ordering
+        image_items = sorted(rec.images.items(), key=lambda x: x[1].name)
+
+        for _, image in image_items:
+            cam_from_world = image.cam_from_world()
+            R = cam_from_world.rotation.matrix()       # 3x3 rotation
+            t = image.projection_center().reshape(3,1) # 3x1 translation (camera center)
+            rotations.append(R)
+            translations.append(t)
+
+        print(f"Extracted {len(rotations)} camera poses from SfM.")
+        return rotations, translations, pcd 
     
-    def make_reference_ply( self, ref_path="reference.ply" ):
+    def make_reference_pcd( self, ref_path="reference.ply" ):
         '''
         Convert reference model from STL file to PLY format for visualization
         and surface matching.
@@ -180,6 +189,14 @@ class StrcFromMotion:
         print(f"Saved reference model to {save_path}")
 
         return
+  
+    def get_reference_pcd( self, ref_path="reference.ply" ): 
+        
+        # Read in pointcloud 
+        save_path = os.path.join( self._sat_model_path, ref_path )
+        pcd = o3d.io.read_point_cloud( save_path ) 
+
+        return pcd  
     
     def surface_matching_ppf_icp(self, store_path="0", voxel_size=0.05, distance_threshold=0.02, 
                                 relative_fitness=1e-6, relative_rmse=1e-6, max_iteration=2000):
@@ -351,146 +368,347 @@ class StrcFromMotion:
         self._visualize_matching_results(results)
         
         return results
+      
+    def generate_synthetic_test_data(self, rotation_degrees=[10, 15, 20], translation=[0.1, 0.2, 0.05], 
+                                   num_points=15000, noise_level=0.0, random_seed=42):
+        '''
+        Generate synthetic test point cloud from reference model with known transformation.
+        This creates a clean test case to verify PPF pipeline functionality.
+        
+        Args:
+            rotation_degrees: [rx, ry, rz] rotation in degrees around each axis
+            translation: [tx, ty, tz] translation in model units
+            num_points: Number of points to sample from reference model
+            noise_level: Standard deviation of Gaussian noise to add (0.0 = noiseless)
+            random_seed: Random seed for reproducible results
+        
+        Returns:
+            dict: Contains transformation info and file paths
+        '''
+        print("=== Generating Synthetic Test Data ===")
+        
+        # Set random seed for reproducibility
+        np.random.seed(random_seed)
+        
+        # Load reference model
+        ref_path = os.path.join(self._sat_model_path, "reference.ply")
+        if not os.path.exists(ref_path):
+            print(f"Reference model not found at {ref_path}")
+            print("Run make_reference_ply() first")
+            return None
+            
+        ref_mesh = o3d.io.read_triangle_mesh(ref_path)
+        
+        # Sample points from reference model
+        ref_pcd = ref_mesh.sample_points_uniformly(number_of_points=num_points)
+        print(f"Sampled {len(ref_pcd.points)} points from reference model")
+        
+        # Create the known transformation matrix
+        from scipy.spatial.transform import Rotation
+        
+        # Convert rotation from degrees to radians and create rotation matrix
+        rotation_rad = np.radians(rotation_degrees)
+        r = Rotation.from_euler('xyz', rotation_rad)
+        R = r.as_matrix()
+        
+        # Create 4x4 transformation matrix
+        known_transform = np.eye(4)
+        known_transform[:3, :3] = R
+        known_transform[:3, 3] = translation
+        
+        print(f"Applied transformation:")
+        print(f"  Rotation (degrees): [{rotation_degrees[0]:.1f}, {rotation_degrees[1]:.1f}, {rotation_degrees[2]:.1f}]")
+        print(f"  Translation: [{translation[0]:.3f}, {translation[1]:.3f}, {translation[2]:.3f}]")
+        
+        # Apply transformation to create synthetic target
+        synthetic_pcd = ref_pcd.transform(known_transform)
+        
+        # Add noise if specified
+        if noise_level > 0.0:
+            points = np.asarray(synthetic_pcd.points)
+            noise = np.random.normal(0, noise_level, points.shape)
+            points += noise
+            synthetic_pcd.points = o3d.utility.Vector3dVector(points)
+            print(f"Added Gaussian noise with std dev: {noise_level:.4f}")
+        
+        # Save synthetic point cloud
+        synthetic_path = os.path.join(self._sat_model_path, "points.ply")
+        o3d.io.write_point_cloud(synthetic_path, synthetic_pcd)
+        print(f"Saved synthetic point cloud to: {synthetic_path}")
+        
+        # Calculate and display statistics
+        ref_center = ref_pcd.get_center()
+        synthetic_center = synthetic_pcd.get_center()
+        center_distance = np.linalg.norm(synthetic_center - ref_center)
+        
+        print(f"\nSynthetic data statistics:")
+        print(f"  Reference center: [{ref_center[0]:.4f}, {ref_center[1]:.4f}, {ref_center[2]:.4f}]")
+        print(f"  Synthetic center: [{synthetic_center[0]:.4f}, {synthetic_center[1]:.4f}, {synthetic_center[2]:.4f}]")
+        print(f"  Center distance: {center_distance:.4f}")
+        
+        # Save transformation info for verification
+        transform_info_path = os.path.join(self._sat_model_path, "synthetic_ground_truth.txt")
+        with open(transform_info_path, 'w') as f:
+            f.write("Synthetic Test Data Ground Truth\n")
+            f.write("================================\n\n")
+            f.write(f"Rotation (degrees): [{rotation_degrees[0]:.1f}, {rotation_degrees[1]:.1f}, {rotation_degrees[2]:.1f}]\n")
+            f.write(f"Translation: [{translation[0]:.3f}, {translation[1]:.3f}, {translation[2]:.3f}]\n")
+            f.write(f"Noise level: {noise_level:.4f}\n")
+            f.write(f"Number of points: {num_points}\n")
+            f.write(f"Random seed: {random_seed}\n\n")
+            f.write("Ground Truth Transformation Matrix:\n")
+            np.savetxt(f, known_transform, fmt='%.6f')
+            f.write(f"\nExpected center distance: {center_distance:.6f}\n")
+        
+        print(f"Ground truth transformation saved to: {transform_info_path}")
+        
+        # Optionally visualize the synthetic data
+        self._visualize_synthetic_data(ref_pcd, synthetic_pcd)
+        
+        return {
+            'known_transform': known_transform,
+            'rotation_degrees': rotation_degrees,
+            'translation': translation,
+            'noise_level': noise_level,
+            'num_points': num_points,
+            'center_distance': center_distance,
+            'synthetic_path': synthetic_path,
+            'ground_truth_path': transform_info_path
+        }
     
-    def _normalize_point_clouds(self, ref_pcd, target_pcd, center_distance, scale_ratio):
+    def run_surface_matching_pipeline(self, store_path="0"):
         '''
-        Normalize point clouds to handle scale and translation differences
+        Run complete surface matching pipeline with multiple parameter sets
+        to find best alignment between reference model and reconstructed point cloud.
         '''
-        print("Applying normalization to handle scale/translation differences...")
+        print("=== Running Complete Surface Matching Pipeline ===")
         
-        # Create copies of point clouds
-        ref_pcd_norm = copy.deepcopy(ref_pcd)
-        target_pcd_norm = copy.deepcopy(target_pcd)
+        # Parameter sets to try (coarse to fine)
+        parameter_sets = [
+            {
+                'name': 'coarse',
+                'voxel_size': 0.1,
+                'distance_threshold': 0.05,
+                'max_iteration': 1000
+            },
+            {
+                'name': 'medium', 
+                'voxel_size': 0.05,
+                'distance_threshold': 0.02,
+                'max_iteration': 2000
+            },
+            {
+                'name': 'fine',
+                'voxel_size': 0.02,
+                'distance_threshold': 0.01,
+                'max_iteration': 3000
+            }
+        ]
         
-        # Get bounding boxes
+        best_result = None
+        best_fitness = 0
+        
+        for i, params in enumerate(parameter_sets):
+            print(f"\n--- Running {params['name']} alignment (Set {i+1}/3) ---")
+            
+            result = self.surface_matching_ppf_icp(
+                store_path=store_path,
+                voxel_size=params['voxel_size'],
+                distance_threshold=params['distance_threshold'],
+                max_iteration=params['max_iteration']
+            )
+            
+            if result and result['icp_fitness'] > best_fitness:
+                best_fitness = result['icp_fitness']
+                best_result = result
+                best_result['parameter_set'] = params['name']
+        
+        if best_result:
+            print(f"\n=== Best Result: {best_result['parameter_set']} alignment ===")
+            print(f"Final Fitness: {best_result['icp_fitness']:.4f}")
+            print(f"Final RMSE: {best_result['icp_rmse']:.4f}")
+            
+            # Save best result summary
+            summary_path = os.path.join(self._sparse_path, store_path, "surface_matching", "best_result_summary.txt")
+            with open(summary_path, 'w') as f:
+                f.write(f"Best Surface Matching Result\n")
+                f.write(f"Parameter Set: {best_result['parameter_set']}\n")
+                f.write(f"ICP Fitness: {best_result['icp_fitness']:.6f}\n")
+                f.write(f"ICP RMSE: {best_result['icp_rmse']:.6f}\n")
+                f.write(f"Mean Distance: {best_result['alignment_metrics']['mean_distance']:.6f}\n")
+                f.write(f"Inlier Ratio: {best_result['alignment_metrics']['inlier_ratio']:.6f}\n")
+        else:
+            print("No successful surface matching results obtained.")
+        
+        return best_result
+    
+    def diagnose_alignment_failure(self, store_path="0"):
+        '''
+        Diagnose why surface matching failed by analyzing point cloud properties.
+        '''
+        print("=== ALIGNMENT FAILURE DIAGNOSIS ===")
+        
+        # Load point clouds
+        ref_path = os.path.join(self._sat_model_path, "reference.ply")
+        
+        # Try multiple possible locations for target point cloud
+        possible_paths = [
+            os.path.join(self._sat_model_path, "points.ply"),
+            os.path.join(store_path, "points.ply"),
+            os.path.join(self._sparse_path, store_path, "points.ply"),
+        ]
+        
+        if not os.path.exists(ref_path):
+            print(f"Reference model not found: {ref_path}")
+            return
+        
+        pcd_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                pcd_path = path
+                print(f"Found target point cloud at: {pcd_path}")
+                break
+        
+        if pcd_path is None:
+            print(f"Target point cloud not found in any location:")
+            for path in possible_paths:
+                print(f"    {path}")
+            return
+        
+        ref_mesh = o3d.io.read_triangle_mesh(ref_path)
+        ref_pcd = ref_mesh.sample_points_uniformly(number_of_points=10000)
+        target_pcd = o3d.io.read_point_cloud(pcd_path)
+        
+        print(f"Loaded reference: {len(ref_pcd.points)} points")
+        print(f"Loaded target: {len(target_pcd.points)} points")
+        
+        # Analyze properties
         ref_bbox = ref_pcd.get_axis_aligned_bounding_box()
         target_bbox = target_pcd.get_axis_aligned_bounding_box()
         
-        # Center both point clouds at origin
         ref_center = ref_bbox.get_center()
         target_center = target_bbox.get_center()
+        ref_extent = ref_bbox.get_extent()
+        target_extent = target_bbox.get_extent()
         
-        ref_pcd_norm.translate(-ref_center)
-        target_pcd_norm.translate(-target_center)
+        center_distance = np.linalg.norm(ref_center - target_center)
+        scale_ratio = np.max(ref_extent) / np.max(target_extent)
         
-        print(f"Centered point clouds (translation applied)")
+        print(f"\nSPATIAL ANALYSIS:")
+        print(f"Reference center: [{ref_center[0]:.2f}, {ref_center[1]:.2f}, {ref_center[2]:.2f}]")
+        print(f"Target center:    [{target_center[0]:.2f}, {target_center[1]:.2f}, {target_center[2]:.2f}]")
+        print(f"Center distance:  {center_distance:.2f}")
         
-        # Handle extreme scale differences
-        if scale_ratio > 10 or scale_ratio < 0.1:
-            print(f"Extreme scale difference detected (ratio: {scale_ratio:.2f}), applying scale normalization")
-            
-            # Scale reference to match target approximately
-            if scale_ratio > 10:
-                # Reference is much larger, scale it down
-                scale_factor = 1.0 / scale_ratio
-                ref_pcd_norm.scale(scale_factor, center=(0, 0, 0))
-                print(f"Scaled reference down by factor {scale_factor:.4f}")
-            elif scale_ratio < 0.1:
-                # Reference is much smaller, scale it up
-                scale_factor = 1.0 / scale_ratio
-                ref_pcd_norm.scale(scale_factor, center=(0, 0, 0))
-                print(f"Scaled reference up by factor {scale_factor:.4f}")
+        print(f"\nSCALE ANALYSIS:")
+        print(f"Reference extent: [{ref_extent[0]:.2f}, {ref_extent[1]:.2f}, {ref_extent[2]:.2f}]")
+        print(f"Target extent:    [{target_extent[0]:.2f}, {target_extent[1]:.2f}, {target_extent[2]:.2f}]")
+        print(f"Scale ratio (ref/target): {scale_ratio:.4f}")
         
-        # Handle large center distances
+        # Diagnosis
+        print(f"\nDIAGNOSIS:")
+        
         if center_distance > 100:
-            print(f"Large center distance ({center_distance:.2f}), centering applied")
+            print(f"Point clouds are very far apart (distance: {center_distance:.1f})")
         
-        # Create transformation record
-        scale_transform = {
-            'ref_translation': -ref_center,
-            'target_translation': -target_center,
-            'scale_factor': 1.0/scale_ratio if (scale_ratio > 10 or scale_ratio < 0.1) else 1.0,
-            'applied_scaling': (scale_ratio > 10 or scale_ratio < 0.1)
+        if scale_ratio > 10:
+            print(f"Reference is much larger than target (ratio: {scale_ratio:.1f})")
+        elif scale_ratio < 0.1:
+            print(f"Reference is much smaller than target (ratio: {scale_ratio:.1f})")
+        
+        if len(target_pcd.points) < 100:
+            print(f"Very few target points ({len(target_pcd.points)})")
+        
+        if np.max(target_extent) < 0.1:
+            print(f"Target point cloud is extremely small (max extent: {np.max(target_extent):.4f})")
+        
+        
+        return {
+            'center_distance': center_distance,
+            'scale_ratio': scale_ratio,
+            'ref_points': len(ref_pcd.points),
+            'target_points': len(target_pcd.points),
+            'ref_extent': ref_extent,
+            'target_extent': target_extent
         }
-        
-        return ref_pcd_norm, target_pcd_norm, scale_transform
     
-    def _preprocess_point_clouds(self, ref_pcd, target_pcd, voxel_size):
-        '''
-        Preprocess point clouds: downsample, estimate normals, remove outliers
-        '''
-        print("Preprocessing point clouds...")
+    def save(self, savepath = "sfm_pipeline.pkl"): 
         
-        # Downsample
-        ref_down = ref_pcd.voxel_down_sample(voxel_size)
-        target_down = target_pcd.voxel_down_sample(voxel_size)
-        
-        # Estimate normals
-        ref_down.estimate_normals(
-            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
-        target_down.estimate_normals(
-            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
-        
-        # Remove statistical outliers
-        ref_clean, _ = ref_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2)
-        target_clean, _ = target_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2)
-        
-        print(f"After preprocessing: \nReference: {len(ref_clean.points)} points, Target: {len(target_clean.points)} points")
-        
-        return ref_clean, target_clean
+        # Save pipeline state for future reuse
+        with open(savepath, "wb") as f:
+            pickle.dump(self, f)
+            
+        print(f"Saved SfM pipeline to '{savepath}'")
+
+        return 
     
-    def _ppf_matching(self, ref_pcd, target_pcd, voxel_size):
-        """
-        Improved PPF-like matching using FPFH + RANSAC with automatic orientation check.
-        Returns the transform that best aligns ref_pcd to target_pcd.
-        """
+    ################### Internal Funcs #####################
+    def _clean_up(self, paths): 
+        
+        # Clean each of the paths 
+        for path in paths:
+            if os.path.exists(path):
+                print(f"Removing old file/folder: {path}")
+                if os.path.isfile(path):
+                    os.remove(path)
+                else:
+                    shutil.rmtree(path)
+
+        return 
+
+    def _make_clean_dirs( self, paths ): 
+        for path in paths: 
+            os.makedirs(path, exist_ok=True)
+
+        return 
+
+    def _visualize_synthetic_data(self, ref_pcd, synthetic_pcd):
+        '''
+        Visualize the reference and synthetic point clouds
+        '''
+        print("Visualizing synthetic test data...")
+        
+        # Create copies for visualization
+        import copy
+        ref_pcd_vis = copy.deepcopy(ref_pcd)
+        synthetic_pcd_vis = copy.deepcopy(synthetic_pcd)
+        
+        ref_pcd_vis.paint_uniform_color([0, 1, 0])      # Green for reference
+        synthetic_pcd_vis.paint_uniform_color([1, 0, 0]) # Red for synthetic target
+        
+        # Create coordinate frame
+        coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
+        
+        # Add center markers
+        ref_center = ref_pcd.get_center()
+        synthetic_center = synthetic_pcd.get_center()
+        
+        ref_marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
+        ref_marker.translate(ref_center)
+        ref_marker.paint_uniform_color([0, 0.8, 0])  # Dark green
+        
+        synthetic_marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
+        synthetic_marker.translate(synthetic_center)
+        synthetic_marker.paint_uniform_color([0.8, 0, 0])  # Dark red
+        
+        # Connect centers with line
+        line_points = [ref_center, synthetic_center]
+        line_lines = [[0, 1]]
+        center_line = o3d.geometry.LineSet()
+        center_line.points = o3d.utility.Vector3dVector(line_points)
+        center_line.lines = o3d.utility.Vector2iVector(line_lines)
+        center_line.paint_uniform_color([1, 1, 0])  # Yellow line
+        
+        # Visualize
+        geometries = [ref_pcd_vis, synthetic_pcd_vis, ref_marker, synthetic_marker, 
+                     center_line, coord_frame]
+        
         try:
-            # Ensure both point clouds have normals
-            normal_radius = max(voxel_size * 2.0, 0.01)
-            ref_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=normal_radius, max_nn=50))
-            target_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=normal_radius, max_nn=50))
-
-            # Use bigger feature radius for more stable FPFH features
-            radius_feature = max(voxel_size * 10.0, 0.05)
-            # radius_feature = max(voxel_size * 20, 0.05)
-            ref_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
-                ref_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=200))
-            target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
-                target_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=200))
-
-            distance_threshold = max(voxel_size * 1.5, 0.01)
-
-            # RANSAC-based global registration
-            result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
-                ref_pcd, target_pcd, ref_fpfh, target_fpfh, mutual_filter=True,
-                max_correspondence_distance=distance_threshold,
-                estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
-                ransac_n=4,
-                checkers=[
-                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.8),
-                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
-                ],
-                criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(500000, 0.999)
-            )
-
-            print(f"RANSAC result: fitness={result.fitness:.6f}, inlier_rmse={result.inlier_rmse:.6f}")
-
-            if result.fitness < 0.08:
-                print("RANSAC failed to find a reliable transform (low fitness).")
-                return None
-
-            # Check alignment quality: direct vs inverse
-            def mean_distance(T):
-                aligned = copy.deepcopy(ref_pcd).transform(T)
-                distances = np.asarray(aligned.compute_point_cloud_distance(target_pcd))
-                return distances.mean()
-
-            direct_dist = mean_distance(result.transformation)
-            inv_dist = mean_distance(np.linalg.inv(result.transformation))
-
-            if inv_dist < direct_dist:
-                print(f"Using inverse of RANSAC transform (mean distance {inv_dist:.6f} < {direct_dist:.6f})")
-                return np.linalg.inv(result.transformation)
-            else:
-                print(f"Using direct RANSAC transform (mean distance {direct_dist:.6f})")
-                return result.transformation
-
+            o3d.visualization.draw_geometries(geometries,
+                                            window_name="Synthetic Test Data (Green=Reference, Red=Target)",
+                                            width=1200, height=800)
         except Exception as e:
-            print(f"PPF matching failed exception: {e}")
-            return None
+            print(f"Visualization failed: {e}")
 
-
-    
     def _icp_refinement(self, ref_pcd, target_pcd, distance_threshold, 
                        relative_fitness, relative_rmse, max_iteration):
         '''
@@ -796,336 +1014,142 @@ class StrcFromMotion:
         
         return quality, confidence
     
-    def generate_synthetic_test_data(self, rotation_degrees=[10, 15, 20], translation=[0.1, 0.2, 0.05], 
-                                   num_points=15000, noise_level=0.0, random_seed=42):
+    def _normalize_point_clouds(self, ref_pcd, target_pcd, center_distance, scale_ratio):
         '''
-        Generate synthetic test point cloud from reference model with known transformation.
-        This creates a clean test case to verify PPF pipeline functionality.
-        
-        Args:
-            rotation_degrees: [rx, ry, rz] rotation in degrees around each axis
-            translation: [tx, ty, tz] translation in model units
-            num_points: Number of points to sample from reference model
-            noise_level: Standard deviation of Gaussian noise to add (0.0 = noiseless)
-            random_seed: Random seed for reproducible results
-        
-        Returns:
-            dict: Contains transformation info and file paths
+        Normalize point clouds to handle scale and translation differences
         '''
-        print("=== Generating Synthetic Test Data ===")
+        print("Applying normalization to handle scale/translation differences...")
         
-        # Set random seed for reproducibility
-        np.random.seed(random_seed)
+        # Create copies of point clouds
+        ref_pcd_norm = copy.deepcopy(ref_pcd)
+        target_pcd_norm = copy.deepcopy(target_pcd)
         
-        # Load reference model
-        ref_path = os.path.join(self._sat_model_path, "reference.ply")
-        if not os.path.exists(ref_path):
-            print(f"Reference model not found at {ref_path}")
-            print("Run make_reference_ply() first")
-            return None
-            
-        ref_mesh = o3d.io.read_triangle_mesh(ref_path)
-        
-        # Sample points from reference model
-        ref_pcd = ref_mesh.sample_points_uniformly(number_of_points=num_points)
-        print(f"Sampled {len(ref_pcd.points)} points from reference model")
-        
-        # Create the known transformation matrix
-        from scipy.spatial.transform import Rotation
-        
-        # Convert rotation from degrees to radians and create rotation matrix
-        rotation_rad = np.radians(rotation_degrees)
-        r = Rotation.from_euler('xyz', rotation_rad)
-        R = r.as_matrix()
-        
-        # Create 4x4 transformation matrix
-        known_transform = np.eye(4)
-        known_transform[:3, :3] = R
-        known_transform[:3, 3] = translation
-        
-        print(f"Applied transformation:")
-        print(f"  Rotation (degrees): [{rotation_degrees[0]:.1f}, {rotation_degrees[1]:.1f}, {rotation_degrees[2]:.1f}]")
-        print(f"  Translation: [{translation[0]:.3f}, {translation[1]:.3f}, {translation[2]:.3f}]")
-        
-        # Apply transformation to create synthetic target
-        synthetic_pcd = ref_pcd.transform(known_transform)
-        
-        # Add noise if specified
-        if noise_level > 0.0:
-            points = np.asarray(synthetic_pcd.points)
-            noise = np.random.normal(0, noise_level, points.shape)
-            points += noise
-            synthetic_pcd.points = o3d.utility.Vector3dVector(points)
-            print(f"Added Gaussian noise with std dev: {noise_level:.4f}")
-        
-        # Save synthetic point cloud
-        synthetic_path = os.path.join(self._sat_model_path, "points.ply")
-        o3d.io.write_point_cloud(synthetic_path, synthetic_pcd)
-        print(f"Saved synthetic point cloud to: {synthetic_path}")
-        
-        # Calculate and display statistics
-        ref_center = ref_pcd.get_center()
-        synthetic_center = synthetic_pcd.get_center()
-        center_distance = np.linalg.norm(synthetic_center - ref_center)
-        
-        print(f"\nSynthetic data statistics:")
-        print(f"  Reference center: [{ref_center[0]:.4f}, {ref_center[1]:.4f}, {ref_center[2]:.4f}]")
-        print(f"  Synthetic center: [{synthetic_center[0]:.4f}, {synthetic_center[1]:.4f}, {synthetic_center[2]:.4f}]")
-        print(f"  Center distance: {center_distance:.4f}")
-        
-        # Save transformation info for verification
-        transform_info_path = os.path.join(self._sat_model_path, "synthetic_ground_truth.txt")
-        with open(transform_info_path, 'w') as f:
-            f.write("Synthetic Test Data Ground Truth\n")
-            f.write("================================\n\n")
-            f.write(f"Rotation (degrees): [{rotation_degrees[0]:.1f}, {rotation_degrees[1]:.1f}, {rotation_degrees[2]:.1f}]\n")
-            f.write(f"Translation: [{translation[0]:.3f}, {translation[1]:.3f}, {translation[2]:.3f}]\n")
-            f.write(f"Noise level: {noise_level:.4f}\n")
-            f.write(f"Number of points: {num_points}\n")
-            f.write(f"Random seed: {random_seed}\n\n")
-            f.write("Ground Truth Transformation Matrix:\n")
-            np.savetxt(f, known_transform, fmt='%.6f')
-            f.write(f"\nExpected center distance: {center_distance:.6f}\n")
-        
-        print(f"Ground truth transformation saved to: {transform_info_path}")
-        
-        # Optionally visualize the synthetic data
-        self._visualize_synthetic_data(ref_pcd, synthetic_pcd)
-        
-        return {
-            'known_transform': known_transform,
-            'rotation_degrees': rotation_degrees,
-            'translation': translation,
-            'noise_level': noise_level,
-            'num_points': num_points,
-            'center_distance': center_distance,
-            'synthetic_path': synthetic_path,
-            'ground_truth_path': transform_info_path
-        }
-    
-    def _visualize_synthetic_data(self, ref_pcd, synthetic_pcd):
-        '''
-        Visualize the reference and synthetic point clouds
-        '''
-        print("Visualizing synthetic test data...")
-        
-        # Create copies for visualization
-        import copy
-        ref_pcd_vis = copy.deepcopy(ref_pcd)
-        synthetic_pcd_vis = copy.deepcopy(synthetic_pcd)
-        
-        ref_pcd_vis.paint_uniform_color([0, 1, 0])      # Green for reference
-        synthetic_pcd_vis.paint_uniform_color([1, 0, 0]) # Red for synthetic target
-        
-        # Create coordinate frame
-        coord_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
-        
-        # Add center markers
-        ref_center = ref_pcd.get_center()
-        synthetic_center = synthetic_pcd.get_center()
-        
-        ref_marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
-        ref_marker.translate(ref_center)
-        ref_marker.paint_uniform_color([0, 0.8, 0])  # Dark green
-        
-        synthetic_marker = o3d.geometry.TriangleMesh.create_sphere(radius=0.02)
-        synthetic_marker.translate(synthetic_center)
-        synthetic_marker.paint_uniform_color([0.8, 0, 0])  # Dark red
-        
-        # Connect centers with line
-        line_points = [ref_center, synthetic_center]
-        line_lines = [[0, 1]]
-        center_line = o3d.geometry.LineSet()
-        center_line.points = o3d.utility.Vector3dVector(line_points)
-        center_line.lines = o3d.utility.Vector2iVector(line_lines)
-        center_line.paint_uniform_color([1, 1, 0])  # Yellow line
-        
-        # Visualize
-        geometries = [ref_pcd_vis, synthetic_pcd_vis, ref_marker, synthetic_marker, 
-                     center_line, coord_frame]
-        
-        try:
-            o3d.visualization.draw_geometries(geometries,
-                                            window_name="Synthetic Test Data (Green=Reference, Red=Target)",
-                                            width=1200, height=800)
-        except Exception as e:
-            print(f"Visualization failed: {e}")
-
-    
-    def run_surface_matching_pipeline(self, store_path="0"):
-        '''
-        Run complete surface matching pipeline with multiple parameter sets
-        to find best alignment between reference model and reconstructed point cloud.
-        '''
-        print("=== Running Complete Surface Matching Pipeline ===")
-        
-        # Parameter sets to try (coarse to fine)
-        parameter_sets = [
-            {
-                'name': 'coarse',
-                'voxel_size': 0.1,
-                'distance_threshold': 0.05,
-                'max_iteration': 1000
-            },
-            {
-                'name': 'medium', 
-                'voxel_size': 0.05,
-                'distance_threshold': 0.02,
-                'max_iteration': 2000
-            },
-            {
-                'name': 'fine',
-                'voxel_size': 0.02,
-                'distance_threshold': 0.01,
-                'max_iteration': 3000
-            }
-        ]
-        
-        best_result = None
-        best_fitness = 0
-        
-        for i, params in enumerate(parameter_sets):
-            print(f"\n--- Running {params['name']} alignment (Set {i+1}/3) ---")
-            
-            result = self.surface_matching_ppf_icp(
-                store_path=store_path,
-                voxel_size=params['voxel_size'],
-                distance_threshold=params['distance_threshold'],
-                max_iteration=params['max_iteration']
-            )
-            
-            if result and result['icp_fitness'] > best_fitness:
-                best_fitness = result['icp_fitness']
-                best_result = result
-                best_result['parameter_set'] = params['name']
-        
-        if best_result:
-            print(f"\n=== Best Result: {best_result['parameter_set']} alignment ===")
-            print(f"Final Fitness: {best_result['icp_fitness']:.4f}")
-            print(f"Final RMSE: {best_result['icp_rmse']:.4f}")
-            
-            # Save best result summary
-            summary_path = os.path.join(self._sparse_path, store_path, "surface_matching", "best_result_summary.txt")
-            with open(summary_path, 'w') as f:
-                f.write(f"Best Surface Matching Result\n")
-                f.write(f"Parameter Set: {best_result['parameter_set']}\n")
-                f.write(f"ICP Fitness: {best_result['icp_fitness']:.6f}\n")
-                f.write(f"ICP RMSE: {best_result['icp_rmse']:.6f}\n")
-                f.write(f"Mean Distance: {best_result['alignment_metrics']['mean_distance']:.6f}\n")
-                f.write(f"Inlier Ratio: {best_result['alignment_metrics']['inlier_ratio']:.6f}\n")
-        else:
-            print("No successful surface matching results obtained.")
-        
-        return best_result
-    
-    def diagnose_alignment_failure(self, store_path="0"):
-        '''
-        Diagnose why surface matching failed by analyzing point cloud properties.
-        '''
-        print("=== ALIGNMENT FAILURE DIAGNOSIS ===")
-        
-        # Load point clouds
-        ref_path = os.path.join(self._sat_model_path, "reference.ply")
-        
-        # Try multiple possible locations for target point cloud
-        possible_paths = [
-            os.path.join(self._sat_model_path, "points.ply"),
-            os.path.join(store_path, "points.ply"),
-            os.path.join(self._sparse_path, store_path, "points.ply"),
-        ]
-        
-        if not os.path.exists(ref_path):
-            print(f"Reference model not found: {ref_path}")
-            return
-        
-        pcd_path = None
-        for path in possible_paths:
-            if os.path.exists(path):
-                pcd_path = path
-                print(f"Found target point cloud at: {pcd_path}")
-                break
-        
-        if pcd_path is None:
-            print(f"Target point cloud not found in any location:")
-            for path in possible_paths:
-                print(f"    {path}")
-            return
-        
-        ref_mesh = o3d.io.read_triangle_mesh(ref_path)
-        ref_pcd = ref_mesh.sample_points_uniformly(number_of_points=10000)
-        target_pcd = o3d.io.read_point_cloud(pcd_path)
-        
-        print(f"Loaded reference: {len(ref_pcd.points)} points")
-        print(f"Loaded target: {len(target_pcd.points)} points")
-        
-        # Analyze properties
+        # Get bounding boxes
         ref_bbox = ref_pcd.get_axis_aligned_bounding_box()
         target_bbox = target_pcd.get_axis_aligned_bounding_box()
         
+        # Center both point clouds at origin
         ref_center = ref_bbox.get_center()
         target_center = target_bbox.get_center()
-        ref_extent = ref_bbox.get_extent()
-        target_extent = target_bbox.get_extent()
         
-        center_distance = np.linalg.norm(ref_center - target_center)
-        scale_ratio = np.max(ref_extent) / np.max(target_extent)
+        ref_pcd_norm.translate(-ref_center)
+        target_pcd_norm.translate(-target_center)
         
-        print(f"\nSPATIAL ANALYSIS:")
-        print(f"Reference center: [{ref_center[0]:.2f}, {ref_center[1]:.2f}, {ref_center[2]:.2f}]")
-        print(f"Target center:    [{target_center[0]:.2f}, {target_center[1]:.2f}, {target_center[2]:.2f}]")
-        print(f"Center distance:  {center_distance:.2f}")
+        print(f"Centered point clouds (translation applied)")
         
-        print(f"\nSCALE ANALYSIS:")
-        print(f"Reference extent: [{ref_extent[0]:.2f}, {ref_extent[1]:.2f}, {ref_extent[2]:.2f}]")
-        print(f"Target extent:    [{target_extent[0]:.2f}, {target_extent[1]:.2f}, {target_extent[2]:.2f}]")
-        print(f"Scale ratio (ref/target): {scale_ratio:.4f}")
+        # Handle extreme scale differences
+        if scale_ratio > 10 or scale_ratio < 0.1:
+            print(f"Extreme scale difference detected (ratio: {scale_ratio:.2f}), applying scale normalization")
+            
+            # Scale reference to match target approximately
+            if scale_ratio > 10:
+                # Reference is much larger, scale it down
+                scale_factor = 1.0 / scale_ratio
+                ref_pcd_norm.scale(scale_factor, center=(0, 0, 0))
+                print(f"Scaled reference down by factor {scale_factor:.4f}")
+            elif scale_ratio < 0.1:
+                # Reference is much smaller, scale it up
+                scale_factor = 1.0 / scale_ratio
+                ref_pcd_norm.scale(scale_factor, center=(0, 0, 0))
+                print(f"Scaled reference up by factor {scale_factor:.4f}")
         
-        # Diagnosis
-        print(f"\nDIAGNOSIS:")
-        
+        # Handle large center distances
         if center_distance > 100:
-            print(f"Point clouds are very far apart (distance: {center_distance:.1f})")
+            print(f"Large center distance ({center_distance:.2f}), centering applied")
         
-        if scale_ratio > 10:
-            print(f"Reference is much larger than target (ratio: {scale_ratio:.1f})")
-        elif scale_ratio < 0.1:
-            print(f"Reference is much smaller than target (ratio: {scale_ratio:.1f})")
-        
-        if len(target_pcd.points) < 100:
-            print(f"Very few target points ({len(target_pcd.points)})")
-        
-        if np.max(target_extent) < 0.1:
-            print(f"Target point cloud is extremely small (max extent: {np.max(target_extent):.4f})")
-        
-        
-        return {
-            'center_distance': center_distance,
-            'scale_ratio': scale_ratio,
-            'ref_points': len(ref_pcd.points),
-            'target_points': len(target_pcd.points),
-            'ref_extent': ref_extent,
-            'target_extent': target_extent
+        # Create transformation record
+        scale_transform = {
+            'ref_translation': -ref_center,
+            'target_translation': -target_center,
+            'scale_factor': 1.0/scale_ratio if (scale_ratio > 10 or scale_ratio < 0.1) else 1.0,
+            'applied_scaling': (scale_ratio > 10 or scale_ratio < 0.1)
         }
-    
-    ################### Internal Funcs #####################
-    def _clean_up(self, paths): 
         
-        # Clean each of the paths 
-        for path in paths:
-            if os.path.exists(path):
-                print(f"Removing old file/folder: {path}")
-                if os.path.isfile(path):
-                    os.remove(path)
-                else:
-                    shutil.rmtree(path)
+        return ref_pcd_norm, target_pcd_norm, scale_transform
+    
+    def _preprocess_point_clouds(self, ref_pcd, target_pcd, voxel_size):
+        '''
+        Preprocess point clouds: downsample, estimate normals, remove outliers
+        '''
+        print("Preprocessing point clouds...")
+        
+        # Downsample
+        ref_down = ref_pcd.voxel_down_sample(voxel_size)
+        target_down = target_pcd.voxel_down_sample(voxel_size)
+        
+        # Estimate normals
+        ref_down.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+        target_down.estimate_normals(
+            search_param=o3d.geometry.KDTreeSearchParamHybrid(radius=voxel_size * 2, max_nn=30))
+        
+        # Remove statistical outliers
+        ref_clean, _ = ref_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2)
+        target_clean, _ = target_down.remove_statistical_outlier(nb_neighbors=20, std_ratio=2)
+        
+        print(f"After preprocessing: \nReference: {len(ref_clean.points)} points, Target: {len(target_clean.points)} points")
+        
+        return ref_clean, target_clean
+    
+    def _ppf_matching(self, ref_pcd, target_pcd, voxel_size):
+        """
+        Improved PPF-like matching using FPFH + RANSAC with automatic orientation check.
+        Returns the transform that best aligns ref_pcd to target_pcd.
+        """
+        try:
+            # Ensure both point clouds have normals
+            normal_radius = max(voxel_size * 2.0, 0.01)
+            ref_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=normal_radius, max_nn=50))
+            target_pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(radius=normal_radius, max_nn=50))
 
-        return 
+            # Use bigger feature radius for more stable FPFH features
+            radius_feature = max(voxel_size * 10.0, 0.05)
+            # radius_feature = max(voxel_size * 20, 0.05)
+            ref_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+                ref_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=200))
+            target_fpfh = o3d.pipelines.registration.compute_fpfh_feature(
+                target_pcd, o3d.geometry.KDTreeSearchParamHybrid(radius=radius_feature, max_nn=200))
 
-    def _make_clean_dirs( self, paths ): 
-        for path in paths: 
-            os.makedirs(path, exist_ok=True)
+            distance_threshold = max(voxel_size * 1.5, 0.01)
 
-        return 
+            # RANSAC-based global registration
+            result = o3d.pipelines.registration.registration_ransac_based_on_feature_matching(
+                ref_pcd, target_pcd, ref_fpfh, target_fpfh, mutual_filter=True,
+                max_correspondence_distance=distance_threshold,
+                estimation_method=o3d.pipelines.registration.TransformationEstimationPointToPoint(False),
+                ransac_n=4,
+                checkers=[
+                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnEdgeLength(0.8),
+                    o3d.pipelines.registration.CorrespondenceCheckerBasedOnDistance(distance_threshold)
+                ],
+                criteria=o3d.pipelines.registration.RANSACConvergenceCriteria(500000, 0.999)
+            )
+
+            print(f"RANSAC result: fitness={result.fitness:.6f}, inlier_rmse={result.inlier_rmse:.6f}")
+
+            if result.fitness < 0.08:
+                print("RANSAC failed to find a reliable transform (low fitness).")
+                return None
+
+            # Check alignment quality: direct vs inverse
+            def mean_distance(T):
+                aligned = copy.deepcopy(ref_pcd).transform(T)
+                distances = np.asarray(aligned.compute_point_cloud_distance(target_pcd))
+                return distances.mean()
+
+            direct_dist = mean_distance(result.transformation)
+            inv_dist = mean_distance(np.linalg.inv(result.transformation))
+
+            if inv_dist < direct_dist:
+                print(f"Using inverse of RANSAC transform (mean distance {inv_dist:.6f} < {direct_dist:.6f})")
+                return np.linalg.inv(result.transformation)
+            else:
+                print(f"Using direct RANSAC transform (mean distance {direct_dist:.6f})")
+                return result.transformation
+
+        except Exception as e:
+            print(f"PPF matching failed exception: {e}")
+            return None
 
     ################### Plotting ##################### 
     def plot_reference_model(self, camera_scale=0.1): 
@@ -1526,29 +1550,3 @@ class StrcFromMotion:
 
         print(f"Saved {len(rec.images)} registered images to '{output_folder}' (folder cleared before copying).")
 
-
-    def get_poses(self, store_path="0"):
-        """
-        Extract the camera poses (rotations and translations) from the SfM reconstruction.
-        Returns:
-            rotations: list of 3x3 numpy arrays (world to camera rotations)
-            translations: list of 3x1 numpy arrays (camera centers in world coordinates)
-        """
-        rec_path = os.path.join(self._sparse_path, store_path)
-        rec = pycolmap.Reconstruction(rec_path)
-
-        rotations = []
-        translations = []
-
-        # Sort images by name for consistent ordering
-        image_items = sorted(rec.images.items(), key=lambda x: x[1].name)
-
-        for _, image in image_items:
-            cam_from_world = image.cam_from_world()
-            R = cam_from_world.rotation.matrix()       # 3x3 rotation
-            t = image.projection_center().reshape(3,1) # 3x1 translation (camera center)
-            rotations.append(R)
-            translations.append(t)
-
-        print(f"Extracted {len(rotations)} camera poses from SfM.")
-        return rotations, translations
