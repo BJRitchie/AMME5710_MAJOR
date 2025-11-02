@@ -128,6 +128,25 @@ class StrcFromMotion:
 
         return 
     
+    def generate_and_plot_pointcloud(self, store_path, img_size, img_interval, nb_pts1 = 30, nb_pts2 = 60): 
+        
+        self.resize_ims( store_path, img_size, img_interval )
+        self.prep_pointcloud() 
+        self.make_pointcloud()
+        
+        print("Plotting raw SFM point cloud (before filtering outliers)\n")
+        self.plot_pointcloud()
+
+        # Eliminate outliers successively (to get rid of clumps - this may need more tuning with new model)
+        self.clean_pointcloud(nb_neighbors=nb_pts1, std_ratio=1)
+        self.clean_pointcloud(nb_neighbors=nb_pts2, std_ratio=1)
+
+        print("Plotting filtered SFM point cloud\n")
+        self.plot_pointcloud()
+
+        
+        return 
+    
     # Clean a point cloud using Statistical Outlier Removal
     def clean_pointcloud( self, nb_neighbors, std_ratio, store_path="0"):         
         # Read the pcloud 

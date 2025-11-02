@@ -1,10 +1,19 @@
 import numpy as np
 import open3d as o3d
 import matplotlib.pyplot as plt
+import copy
+import pycolmap 
+import os 
 
+from sfm_pipeline_lib import StrcFromMotion 
+from checkerboard_lib import Checkerboard
 
 class PointCloudMatcher: 
-    def __init__(self):
+    def __init__(self, sfm: StrcFromMotion, cb: Checkerboard):
+        
+        # Store the classes 
+        self._SFM = copy.deepcopy(sfm)
+        self._CB = copy.deepcopy(cb) 
         
         # Internal variables
         self._R = None 
@@ -24,6 +33,49 @@ class PointCloudMatcher:
 
         pass
     
+    def matchPoints( self, sparse_path = "sparse/0" ): 
+        
+        # Checkerboard camera poses 
+        checker_rotations, checker_translations = self._CB.get_camera_poses()
+        checker_translations = np.array(checker_translations)[:, :, 0].T # turn into 3xN
+        checker_rotations = np.array(checker_rotations).transpose(1, 2, 0) # turn into 3xN
+
+        # Get SFM camera poses 
+        sfm_rotations, sfm_translations, pcd = self._SFM.get_pointcloud_and_poses()
+        sfm_pcd_np = np.asarray(pcd.points).T 
+        sfm_translations = np.array(sfm_translations)[:, :, 0].T 
+        sfm_rotations = np.array(sfm_rotations).transpose(1, 2, 0)
+
+        # Extract the matched poses 
+        matched_indices_sfm, matched_indices_cb = self._match_sfm_camera_poses( sparse_path = sparse_path )
+        sfm_translations_matched    = (sfm_translations[:, matched_indices_sfm])
+        sfm_rotations_matched       = (sfm_rotations[:, :, matched_indices_sfm])
+        checker_trans_matched       = (checker_translations[:, matched_indices_cb])
+        checker_rot_matched         = (checker_rotations[:, :, matched_indices_cb])
+
+        # Apply matching to poses 
+        R, t, s, T, best_inliers = self.matchFromPosesRANSAC( 
+            poses0=sfm_translations_matched, 
+            poses1=checker_trans_matched, 
+            threshold=0.05, 
+            ransac_samples=5 ) 
+
+        print(f"Number of inliers: { len(best_inliers) }")
+
+        print("\n====== Umeyama ======") 
+        print("R: ") 
+        print(R)
+        print("\nt: ") 
+        print(t)
+        print("\ns: ") 
+        print(s)
+
+        self.transformPointClouds( sfm_pcd_np, None ) 
+        self.transformCameraPoses( 
+            sfm_translations_matched, sfm_rotations_matched, checker_trans_matched, checker_rot_matched )
+
+        return R, t, s, T 
+            
     def matchFromPosesRANSAC( self, poses0, poses1, threshold=0.02, max_iter=1000, ransac_samples=5 ): 
         
         N = poses0.shape[1]
@@ -248,8 +300,6 @@ class PointCloudMatcher:
         # --- Input checks
         # pc0 = np.asarray(pc0)
 
-        if pc0.shape != pc0.shape:
-            raise ValueError("poses0 and poses1 must have the same shape")
         if pc0.shape[0] != 3:
             raise ValueError("Input arrays must be 3xN")
         
@@ -317,7 +367,7 @@ class PointCloudMatcher:
         import open3d as o3d
         import numpy as np
 
-        assert self._pc0 is not None and self._pc0_t is not None and self._pc1 is not None, "Missing point clouds."
+        assert self._pc0 is not None and self._pc0_t is not None, "Missing point clouds."
         assert hasattr(self, "_cam_centers0") and hasattr(self, "_cam_centers1"), "Camera poses not defined."
 
         r = [1.0, 0.0, 0.0]
@@ -329,20 +379,23 @@ class PointCloudMatcher:
         # --- Convert arrays to Open3D point clouds ---
         pc0_orig = o3d.geometry.PointCloud()
         pc0_trans = o3d.geometry.PointCloud()
-        pc1 = o3d.geometry.PointCloud()
 
         pc0_orig.points = o3d.utility.Vector3dVector(self._pc0.T)
         pc0_trans.points = o3d.utility.Vector3dVector(self._pc0_t.T)
-        pc1.points = o3d.utility.Vector3dVector(self._pc1.T)
 
         pc0_orig.paint_uniform_color(g)
         pc0_trans.paint_uniform_color(r)
-        pc1.paint_uniform_color(b)
         
         if plot_original: 
-            geometries.extend([pc0_orig, pc0_trans, pc1])
+            geometries.extend([pc0_orig, pc0_trans])
         else: 
-            geometries.extend([pc0_trans, pc1])
+            geometries.append(pc0_trans)
+
+        if type(self._pc1) != type(None): 
+            pc1 = o3d.geometry.PointCloud()
+            pc1.points = o3d.utility.Vector3dVector(self._pc1.T)
+            pc1.paint_uniform_color(b) 
+            geometries.append(pc1)
 
         # --- Helper to create frustum in world space ---
         def make_camera_frustum(center, R_world_from_cam, color, scale):
@@ -432,6 +485,34 @@ class PointCloudMatcher:
         err = pos_err + w_rot * rot_err
         return err 
 
+    def _match_sfm_camera_poses( self, sparse_path ):
+        
+        rec = pycolmap.Reconstruction(sparse_path)
+        images_sorted = sorted(rec.images.values(), key=lambda x: x.name)
+        name_to_index = {os.path.basename(img.name): i for i, img in enumerate(images_sorted)}
+        index_to_name = {i: os.path.basename(img.name) for i, img in enumerate(images_sorted)}
+
+        matched_indices_sfm = []
+        matched_indices_cb = []
+
+        print("===== Matched Image Pairs =====")
+        print(f"{'Checkerboard Image':40s}  |  {'SfM Image':40s}")
+
+        for j, cb_name in enumerate(self._CB._checker_image_names):
+            cb_base = os.path.basename(cb_name)
+            
+            if cb_base in name_to_index:
+                sfm_idx = name_to_index[cb_base]
+                sfm_name = index_to_name[sfm_idx]
+                print(f"{cb_base:40s}  |  {sfm_name:40s}")
+
+                matched_indices_sfm.append(sfm_idx)
+                matched_indices_cb.append(j)
+
+        print("\nTotal matched pairs:", len(matched_indices_sfm))
+        return np.array(matched_indices_sfm, dtype=int), np.array(matched_indices_cb, dtype=int)
+
+
 
 # test
 if __name__ == "__main__": 
@@ -469,73 +550,73 @@ if __name__ == "__main__":
 
     # ------- POINTCLOUD TEST ------- # 
     # File names 
-    store_path= "images/checker_nasa_box"
-    vid_path = 'images/checker_nasa_box.mp4'
-    sfm_save_path = "images/checker_nasa_box_sfm"
+    store_path_= "images/checker_nasa_box"
+    vid_path_ = 'images/checker_nasa_box.mp4'
+    sfm_save_path_ = "images/checker_nasa_box_sfm"
 
     # Storage files 
-    im_path = store_path
-    db_path = "database.db"
-    sparse_path = "sparse"
-    dense_path = "dense"
-    sat_model_path = "sat_model"
+    im_path_ = store_path_
+    db_path_ = "database.db"
+    sparse_path_ = "sparse"
+    dense_path_ = "dense"
+    sat_model_path_ = "sat_model"
 
     
     # Load sfm class 
-    with open("sfm_pipeline.pkl", "rb") as f:
-        sfm_pipeline = pickle.load(f)
+    with open("sfm_pipeline.pkl", "rb") as f_:
+        sfm_pipeline_ = pickle.load(f_)
 
-    with open("checkerboard.pkl", "rb") as f:
-        cb = pickle.load(f)
+    with open("checkerboard.pkl", "rb") as f_:
+        cb_ = pickle.load(f_)
 
     print("Loaded saved SfM pipeline and checkerboard data")
 
     # Construct paths
-    store_name = os.path.join(sparse_path, '0')
-    file_path = os.path.join(store_name, "points.ply")
+    store_name_ = os.path.join(sparse_path_, '0')
+    file_path_ = os.path.join(store_name_, "points.ply")
 
     # Load point cloud
-    if not os.path.exists(file_path):
-        raise FileNotFoundError(f"points.ply not found at {file_path}")
-    pcd = o3d.io.read_point_cloud(file_path) # Output of SFM 
+    if not os.path.exists(file_path_):
+        raise FileNotFoundError(f"points.ply not found at {file_path_}")
+    pcd_ = o3d.io.read_point_cloud(file_path_) # Output of SFM 
 
     # SFM points 
-    sfm_pcd = np.asarray(pcd.points).T 
+    sfm_pcd_ = np.asarray(pcd_.points).T 
 
     # Get SFM camera poses 
-    sfm_rotations, sfm_translations = sfm_pipeline.get_poses()
-    sfm_translations = np.array(sfm_translations)[:, :, 0].T 
-    sfm_rotations = np.array(sfm_rotations).transpose(1, 2, 0)
+    sfm_rotations_, sfm_translations_ = sfm_pipeline_.get_poses()
+    sfm_translations_ = np.array(sfm_translations_)[:, :, 0].T 
+    sfm_rotations_ = np.array(sfm_rotations_).transpose(1, 2, 0)
 
     # Generate example transform 
-    s_true = 2
-    R_true = rotation_mat_degs(roll=45, pitch=72, yaw=132) 
-    t_true = np.empty((3,1))
-    t_true[:,0] = [5, 10, 15]
+    s_true_ = 2
+    R_true_ = rotation_mat_degs(roll=45, pitch=72, yaw=132) 
+    t_true_ = np.empty((3,1))
+    t_true_[:,0] = [5, 10, 15]
     
-    synth_translations, synth_rotations = apply_transform(s_true, R_true, t_true, sfm_translations, sfm_rotations)
-    synth_pcd, _ = apply_transform(s_true, R_true, t_true, sfm_pcd, None) 
+    synth_translations_, synth_rotations_ = apply_transform(s_true_, R_true_, t_true_, sfm_translations_, sfm_rotations_)
+    synth_pcd_, _ = apply_transform(s_true_, R_true_, t_true_, sfm_pcd_, None) 
 
     print("====== TRUE ======") 
     print("R_true: ") 
-    print(R_true)
+    print(R_true_)
     print("\nt_true: ") 
-    print(t_true)
+    print(t_true_)
     print("\ns_true: ") 
-    print(s_true)
+    print(s_true_)
 
-    pc_matcher = PointCloudMatcher() 
-    R_matcher, t_matcher, s_matcher, T_matcher = pc_matcher.matchFromPoses( sfm_translations, synth_translations )
+    pc_matcher_ = PointCloudMatcher() 
+    R_matcher_, t_matcher_, s_matcher_, T_matcher_ = pc_matcher_.matchFromPoses( sfm_translations_, synth_translations_ )
 
     print("\n====== Umeyama ======") 
     print("R: ") 
-    print(R_matcher)
+    print(R_matcher_)
     print("\nt: ") 
-    print(t_matcher)
+    print(t_matcher_)
     print("\ns: ") 
-    print(s_matcher)
+    print(s_matcher_)
 
-    pc_matcher.transformPointClouds( sfm_pcd, synth_pcd )
-    pc_matcher.transformCameraPoses( sfm_translations, sfm_rotations, synth_translations, synth_rotations )
-    pc_matcher.plotPointClouds()
+    pc_matcher_.transformPointClouds( sfm_pcd_, synth_pcd_ )
+    pc_matcher_.transformCameraPoses( sfm_translations_, sfm_rotations_, synth_translations_, synth_rotations_ )
+    pc_matcher_.plotPointClouds()
 

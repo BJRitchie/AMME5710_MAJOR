@@ -50,7 +50,7 @@ sfm_pipeline.make_reference_pcd( ref_path )
 sfm_pipeline.resize_ims( store_path, 1200, 2 )
 sfm_pipeline.prep_pointcloud() 
 sfm_pipeline.make_pointcloud()
-sfm_pipeline.clean_pointcloud( nb_points=50, radius=1) 
+sfm_pipeline.clean_pointcloud( nb_neighbors=1, std_ratio=1 ) 
 sfm_pipeline.plot_pointcloud()
 
 # Save only the images that SfM used
@@ -150,17 +150,6 @@ R, t, s, T, best_inliers = pc_matcher.matchFromPosesRANSAC(
     poses1=checker_trans_matched, 
     threshold=0.01, 
     ransac_samples=10 ) 
-
-# R, t, s, T, best_inliers = pc_matcher.matchFromPosesOrientsRANSAC(
-#     poses0=sfm_translations_matched,
-#     rots0=sfm_rotations_matched, 
-#     poses1=checker_trans_matched, 
-#     rots1=checker_rot_matched,
-#     w_rot=1,
-#     ransac_samples=5, 
-#     threshold=0.1, 
-#     max_iter=1000
-# )
 
 # check SVD singular values:
 print(f"Number of inliers: { len(best_inliers) }")
