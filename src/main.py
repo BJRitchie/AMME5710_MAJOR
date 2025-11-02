@@ -259,7 +259,8 @@ if mode == "SAVE":
         device      =pycolmap.Device.cpu 
     ) 
 
-    sfm_pipeline.make_reference_pcd() # TODO Change this/change solidwork file it points to 
+    # sfm_pipeline.make_reference_pcd() # TODO Change this/change solidwork file it points to 
+    sfm_pipeline.make_reference_pcd()  
     sfm_pipeline.plot_reference_model()
     
     sfm_pipeline.generate_and_plot_pointcloud(
