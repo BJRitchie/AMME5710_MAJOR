@@ -10,8 +10,11 @@ database.db
 data 
 images/
 *__pycache__/
+*.pkl
+*.bak
 
 # # Exceptions
 # !src/
 # !images/
 # !README.md
+
