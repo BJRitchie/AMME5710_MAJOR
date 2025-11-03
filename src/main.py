@@ -231,7 +231,7 @@ img_interval = 1 # Include every nth image from video into SFM generation
 
 # File paths - TODO replace naming with concatenations 
 store_path= "images/octosat"
-vid_path = 'images/octosat_136_lux2.mp4'
+vid_path = 'images/octosat_foil2.mp4'
 sfm_save_path = "images/octosat_sfm"
 im_path = store_path
 db_path = "database.db"
@@ -292,6 +292,8 @@ else:
 
 # sfm_pipeline.make_reference_pcd() # TODO Change this/change solidwork file it points to 
 ref_pcd = sfm_pipeline.make_reference_pcd(num_points=5000, stl_file_path="sat_body_solid.stl")  
+sfm_pipeline.plot_reference_model() 
+
 centroid = ref_pcd.get_center()
 ref_pcd.scale(1.0/1000.0, center=centroid) # from mm to m 
 
