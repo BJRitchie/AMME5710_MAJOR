@@ -231,8 +231,9 @@ img_interval = 1 # Include every nth image from video into SFM generation
 
 # File paths - TODO replace naming with concatenations 
 store_path= "images/octosat"
-vid_path = 'images/octosat_foil2.mp4'
+vid_path = 'images/octsat_foil1.mp4'
 sfm_save_path = "images/octosat_sfm"
+
 im_path = store_path
 db_path = "database.db"
 sparse_path = "sparse"
