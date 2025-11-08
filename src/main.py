@@ -225,7 +225,7 @@ def match_sfm_camera_poses(cb, sparse_path="sparse/0"):
 
 
 # Change between SAVE and LOAD to generate/load SFM and checkerboard pickle files
-mode = "SAVE" 
+mode = "LOAD" 
 img_interval = 1 # Include every nth image from video into SFM generation
 
 
