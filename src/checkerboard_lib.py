@@ -95,7 +95,7 @@ class Checkerboard:
             pattern_points = np.zeros((np.prod(grid_size), 3), np.float32)
             pattern_points[:, :2] = np.indices(grid_size).T.reshape(-1, 2)
             pattern_points = cell_size * pattern_points
-            corr_3d_points.append(pattern_points)
+            corr_3d_points.append(pattern_points) 
 
         # Calibrate the camera 
         output = cv2.calibrateCameraExtended(

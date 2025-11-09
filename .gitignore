@@ -16,6 +16,7 @@ images/
 *.pkl
 *.bak
 
+!*images/octosat_176_lux1.mp4
 # # Exceptions
 # !src/
 # !images/

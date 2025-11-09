@@ -211,19 +211,6 @@ def match_sfm_camera_poses(cb, sparse_path="sparse/0"):
 # --> ICP to refine alignment (ICP needs initial guess/global adjustment, can run from start since can get stuck in local minimum)
 
 
-# TODO (later today - do before using new models)
-# Fix reference generation - atm is generating a box point cloud, haven't changed back to using make_refernece
-# - I think will just need to change what the reference file is then call that same function and it'll work
-# - But also it is stored in the class so need to change how things are called/returned to use in later functions
-# - that aren't integrated into the class yes 
-
-# TODO (not necessary today for code to run)
-# Move new functions into class and delete all old alignment ones
-# Turn visualisations etc into functions in class 
-
-
-
-
 # Change between SAVE and LOAD to generate/load SFM and checkerboard pickle files
 mode = "SAVE" 
 img_interval = 1 # Include every nth image from video into SFM generation
@@ -231,7 +218,7 @@ img_interval = 1 # Include every nth image from video into SFM generation
 
 # File paths - TODO replace naming with concatenations 
 store_path= "images/octosat"
-vid_path = 'images/octsat_foil1.mp4'
+vid_path = 'octosat_176_lux1.mp4'
 sfm_save_path = "images/octosat_sfm"
 
 im_path = store_path
